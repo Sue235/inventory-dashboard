@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weber Workshops · Inventory Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #fafaf8;
+  --surface: #ffffff;
+  --surface2: #f5f5f2;
+  --border: #e8e6e1;
+  --border2: #d4d0c8;
+  --text: #1a1a18;
+  --muted: #6b6860;
+  --muted2: #9e9b94;
+  --ok: #16a34a;
+  --ok-bg: #f0fdf4;
+  --low: #ca8a04;
+  --low-bg: #fefce8;
+  --critical: #dc2626;
+  --critical-bg: #fef2f2;
+  --new: #7c3aed;
+  --new-bg: #f5f3ff;
+  --out: #64748b;
+  --out-bg: #f8fafc;
+  --disc: #a8a29e;
+  --disc-bg: #fafaf8;
+  --accent: #1a1a18;
+  --tpe: #2563eb;
+  --gol: #059669;
+  --ham: #ea580c;
+  --jp: #9333ea;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'DM Mono', monospace; min-height: 100vh; }
+
+/* SYNC BAR */
+.sync-bar {
+  background: var(--text); color: #fff;
+  padding: 8px 32px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.sync-info { flex: 1; font-size: 11px; color: rgba(255,255,255,.55); font-family: 'DM Mono', monospace; }
+.sync-info strong { color: #fff; }
+.sync-btn {
+  background: #fff; color: var(--text); border: none; border-radius: 4px;
+  padding: 6px 14px; font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 600;
+  cursor: pointer; display: flex; align-items: center; gap: 5px; transition: opacity .15s;
+}
+.sync-btn:hover { opacity: .85; }
+.sync-btn:disabled { opacity: .4; cursor: not-allowed; }
+.sync-status { font-size: 11px; font-family: 'DM Mono', monospace; padding: 3px 8px; border-radius: 3px; }
+.sync-status.ok { background: rgba(255,255,255,.15); color: #86efac; }
+.sync-status.error { background: rgba(239,68,68,.2); color: #fca5a5; }
+.spinner { width: 11px; height: 11px; border: 2px solid rgba(0,0,0,.2); border-top-color: var(--text); border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* HEADER */
+.header {
+  padding: 32px 32px 24px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+}
+.header-left h1 { font-family: 'DM Mono', monospace; font-size: 22px; font-weight: 500; letter-spacing: -.5px; }
+.header-left p { font-size: 12px; color: var(--muted); margin-top: 4px; font-family: 'DM Mono', monospace; }
+.live-badge {
+  background: var(--text); color: #fff; font-size: 10px; font-weight: 600;
+  padding: 4px 10px; border-radius: 2px; letter-spacing: 1.5px; text-transform: uppercase;
+}
+
+/* STATS */
+.stats-row { display: flex; gap: 1px; background: var(--border); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.stat-card {
+  flex: 1; background: var(--surface); padding: 20px 24px; cursor: pointer;
+  transition: background .1s; border: none; text-align: left;
+}
+.stat-card:hover { background: var(--surface2); }
+.stat-card.active { background: var(--text); }
+.stat-card .num { font-size: 28px; font-weight: 400; line-height: 1; font-family: 'DM Mono', monospace; }
+.stat-card .lbl { font-size: 10px; color: var(--muted); margin-top: 6px; font-weight: 500; text-transform: uppercase; letter-spacing: .8px; }
+.stat-card.active .num, .stat-card.active .lbl { color: #fff; }
+.num.c-critical { color: var(--critical); }
+.num.c-out { color: var(--out); }
+.num.c-low { color: var(--low); }
+.num.c-ok { color: var(--ok); }
+.num.c-new { color: var(--new); }
+
+/* CHARTS */
+.charts-row { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+.chart-card { flex: 1; padding: 24px; border-right: 1px solid var(--border); }
+.chart-card:last-child { border-right: none; }
+.chart-card h3 { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.chart-pager { display: flex; align-items: center; gap: 6px; }
+.pager-btn {
+  background: none; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1;
+  padding: 2px 7px; transition: all .12s;
+}
+.pager-btn:hover:not(:disabled) { border-color: var(--text); color: var(--text); }
+.pager-btn:disabled { opacity: .25; cursor: not-allowed; }
+.pager-label { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; min-width: 40px; text-align: center; }
+.chart-wrap { position: relative; height: 200px; }
+
+/* FILTERS */
+.filter-bar {
+  padding: 16px 32px; border-bottom: 1px solid var(--border);
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.search-box {
+  flex: 1; min-width: 200px; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 8px 12px; color: var(--text); font-family: 'DM Mono', monospace;
+  font-size: 12px; outline: none;
+}
+.search-box:focus { border-color: var(--text); background: var(--surface); }
+.search-box::placeholder { color: var(--muted2); }
+.cat-select {
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
+  padding: 8px 12px; color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px;
+  font-weight: 500; outline: none; cursor: pointer; min-width: 160px;
+}
+.cat-select:focus { border-color: var(--text); }
+.filter-btns { display: flex; gap: 4px; flex-wrap: wrap; }
+.fbtn {
+  padding: 6px 12px; border-radius: 3px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted); font-family: 'DM Mono', monospace;
+  font-size: 11px; font-weight: 500; cursor: pointer; transition: all .12s; white-space: nowrap;
+}
+.fbtn:hover { border-color: var(--text); color: var(--text); }
+.fbtn.active { background: var(--text); color: #fff; border-color: var(--text); }
+.fbtn.f-critical.active { background: var(--critical); border-color: var(--critical); }
+.fbtn.f-out.active { background: var(--out); border-color: var(--out); }
+.fbtn.f-low.active { background: var(--low); border-color: var(--low); }
+.fbtn.f-ok.active { background: var(--ok); border-color: var(--ok); }
+.fbtn.f-new.active { background: var(--new); border-color: var(--new); }
+.key-btn {
+  padding: 6px 12px; border-radius: 3px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--muted); font-family: 'DM Mono', monospace;
+  font-size: 11px; font-weight: 500; cursor: pointer; transition: all .12s;
+}
+.key-btn.active { border-color: var(--low); color: var(--low); background: var(--low-bg); }
+
+/* TABLE */
+.table-wrap { overflow-x: auto; }
+.table-meta { padding: 12px 32px 8px; font-size: 11px; color: var(--muted2); font-family: 'DM Mono', monospace; }
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+thead th {
+  background: var(--surface2); padding: 10px 16px; text-align: left;
+  font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .7px; border-bottom: 1px solid var(--border); cursor: pointer;
+  white-space: nowrap; user-select: none; position: sticky; top: 0; z-index: 1;
+}
+thead th:hover { color: var(--text); }
+thead th.sorted { color: var(--text); }
+.si { opacity: .3; margin-left: 3px; }
+thead th.sorted .si { opacity: 1; }
+tbody tr { border-bottom: 1px solid var(--border); transition: background .08s; cursor: pointer; }
+tbody tr:hover { background: var(--surface2); }
+tbody tr.key-row { background: #fffbeb; }
+tbody tr.key-row:hover { background: #fef9c3; }
+td { padding: 11px 16px; vertical-align: middle; }
+.iname { font-weight: 500; font-size: 12px; color: var(--text); }
+.imodel { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted2); margin-top: 2px; }
+.key-star { color: var(--low); margin-right: 4px; font-size: 11px; }
+.cat-tag {
+  display: inline-block; padding: 1px 6px; border-radius: 2px; font-size: 9px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin-top: 3px;
+  background: var(--surface2); color: var(--muted); border: 1px solid var(--border);
+}
+.wh-chips { display: flex; gap: 3px; flex-wrap: wrap; }
+.chip {
+  display: flex; align-items: center; gap: 3px; font-family: 'DM Mono', monospace;
+  font-size: 10px; padding: 2px 6px; border-radius: 2px; border: 1px solid;
+}
+.chip.tpe { color: var(--tpe); border-color: rgba(37,99,235,.2); background: rgba(37,99,235,.05); }
+.chip.gol { color: var(--gol); border-color: rgba(5,150,105,.2); background: rgba(5,150,105,.05); }
+.chip.ham { color: var(--ham); border-color: rgba(234,88,12,.2); background: rgba(234,88,12,.05); }
+.chip.jp  { color: var(--jp);  border-color: rgba(147,51,234,.2); background: rgba(147,51,234,.05); }
+.dot { width: 5px; height: 5px; border-radius: 50%; }
+.dot.tpe { background: var(--tpe); } .dot.gol { background: var(--gol); }
+.dot.ham { background: var(--ham); } .dot.jp  { background: var(--jp); }
+.mono { font-family: 'DM Mono', monospace; }
+.cov-wrap { width: 100px; }
+.cov-text { font-family: 'DM Mono', monospace; font-size: 11px; margin-bottom: 4px; }
+.cov-bar { height: 3px; background: var(--border); border-radius: 1px; overflow: hidden; }
+.cov-fill { height: 100%; border-radius: 1px; }
+.badge {
+  display: inline-block; padding: 2px 7px; border-radius: 2px; font-size: 10px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: .5px; white-space: nowrap;
+}
+.b-ok          { background: var(--ok-bg);   color: var(--ok);       border: 1px solid rgba(22,163,74,.2); }
+.b-critical    { background: var(--critical-bg); color: var(--critical); border: 1px solid rgba(220,38,38,.2); }
+.b-low         { background: var(--low-bg);  color: var(--low);      border: 1px solid rgba(202,138,4,.2); }
+.b-new         { background: var(--new-bg);  color: var(--new);      border: 1px solid rgba(124,58,237,.2); }
+.b-out_of_stock{ background: var(--out-bg);  color: var(--out);      border: 1px solid rgba(100,116,139,.2); }
+.b-discontinued{ background: var(--disc-bg); color: var(--disc);     border: 1px solid var(--border); }
+.data-note { font-size: 9px; color: var(--muted2); font-family: 'DM Mono', monospace; margin-top: 2px; }
+.remark-text { font-size: 10px; color: var(--muted); max-width: 160px; line-height: 1.4; }
+
+/* LEGEND */
+.legend {
+  display: flex; gap: 16px; flex-wrap: wrap; padding: 12px 32px;
+  border-bottom: 1px solid var(--border); background: var(--surface2);
+}
+.li { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); font-weight: 500; }
+.ldot { width: 8px; height: 8px; border-radius: 50%; }
+
+/* MODAL */
+.overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4);
+  z-index: 200; align-items: center; justify-content: center; padding: 20px;
+  backdrop-filter: blur(4px);
+}
+.overlay.open { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto;
+  padding: 28px; box-shadow: 0 20px 60px rgba(0,0,0,.12);
+}
+.mhdr { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+.mtitle h2 { font-family: 'DM Mono', monospace; font-size: 16px; font-weight: 500; }
+.mtitle p { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); margin-top: 4px; }
+.mclose {
+  background: none; border: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; border-radius: 4px; padding: 5px 9px; font-size: 14px; line-height: 1;
+}
+.mclose:hover { background: var(--surface2); color: var(--text); }
+.mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.mkpi { background: var(--surface2); border-radius: 4px; padding: 12px; border: 1px solid var(--border); }
+.mkpi .kl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 5px; font-weight: 500; }
+.mkpi .kv { font-size: 18px; font-weight: 500; font-family: 'DM Mono', monospace; }
+.mkpi .ks { font-size: 10px; color: var(--muted2); font-family: 'DM Mono', monospace; margin-top: 2px; }
+.mwh { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.mwh-item { flex: 1; min-width: 90px; background: var(--surface2); border-radius: 4px; padding: 10px; text-align: center; border: 1px solid var(--border); }
+.mwh-item .wn { font-size: 9px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+.mwh-item .wq { font-size: 16px; font-weight: 500; font-family: 'DM Mono', monospace; }
+.mchart-wrap { height: 150px; margin-bottom: 12px; }
+.mremark { background: var(--surface2); border-radius: 4px; padding: 12px; font-size: 11px; color: var(--muted); line-height: 1.6; border: 1px solid var(--border); }
+.mremark strong { color: var(--text); display: block; margin-bottom: 4px; font-size: 10px; text-transform: uppercase; letter-spacing: .7px; font-weight: 600; }
+
+/* LOADING */
+.loading-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(250,250,248,.92);
+  z-index: 300; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+}
+.loading-overlay.open { display: flex; }
+.big-spinner { width: 32px; height: 32px; border: 2px solid var(--border2); border-top-color: var(--text); border-radius: 50%; animation: spin .8s linear infinite; }
+.loading-msg { font-size: 13px; color: var(--text); font-weight: 500; }
+.loading-sub { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; }
+
+@media (max-width: 768px) {
+  .header, .filter-bar, .legend, .table-meta, .sync-bar { padding-left: 16px; padding-right: 16px; }
+  td, thead th { padding-left: 12px; padding-right: 12px; }
+  .stats-row { flex-wrap: wrap; }
+  .stat-card { min-width: 45%; }
+  .charts-row { flex-direction: column; }
+  .chart-card { border-right: none; border-bottom: 1px solid var(--border); }
+  .modal { padding: 20px; }
+  .mgrid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="big-spinner"></div>
+  <p class="loading-msg" id="loadingMsg">Syncing data...</p>
+  <p class="loading-sub" id="loadingSub"></p>
+</div>
+
+<div class="sync-bar">
+  <div class="sync-info">
+    <strong>Data source:</strong> Google Sheet &nbsp;·&nbsp; <span id="lastSyncTime">Not yet synced</span>
+  </div>
+  <span id="syncStatus" class="sync-status" style="display:none"></span>
+  <button class="sync-btn" id="syncBtn" onclick="syncAll()">
+    <span>↻</span> Sync Latest Data
+  </button>
+</div>
+
+<div class="header">
+  <div class="header-left" style="display:flex;align-items:baseline;gap:16px;">
+    <span class="live-badge" id="weekBadge" style="font-size:14px;padding:6px 14px;letter-spacing:2px;">WEEK —</span>
+    <div>
+      <h1>Inventory Dashboard</h1>
+      <p id="headerSub">All products · TPE / Golden / Hamburg / JP</p>
+    </div>
+  </div>
+</div>
+
+<div class="stats-row" id="statsRow"></div>
+
+<div class="filter-bar">
+  <input class="search-box" id="searchBox" type="text" placeholder="Search by name or SKU...">
+  <select class="cat-select" id="catSelect">
+    <option value="all">All Categories</option>
+    <option value="Grinders">Grinders</option>
+    <option value="Brewers">Brewers</option>
+    <option value="Espresso Tools">Espresso Tools</option>
+    <option value="Bean Storage">Bean Storage</option>
+    <option value="Accessories">Accessories</option>
+    <option value="Spare Parts">Spare Parts</option>
+    <option value="Merchandise">Merchandise</option>
+    <option value="Equipment">Equipment</option>
+  </select>
+  <select class="cat-select" id="whSelect">
+    <option value="all">All Warehouses</option>
+    <option value="tpe">TPE (Taipei)</option>
+    <option value="ww_gol">Golden (US)</option>
+    <option value="hamburg">Hamburg (DE)</option>
+    <option value="jp">JP (Japan)</option>
+  </select>
+  <div class="filter-btns">
+    <button class="fbtn f-all active" data-f="all">All</button>
+    <button class="fbtn f-critical" data-f="critical">⬤ Critical</button>
+    <button class="fbtn f-out" data-f="out_of_stock">⬤ Out of Stock</button>
+    <button class="fbtn f-low" data-f="low">⬤ Low</button>
+    <button class="fbtn f-ok" data-f="ok">⬤ OK</button>
+    <button class="fbtn f-new" data-f="new">⬤ New</button>
+    <button class="fbtn f-disc" data-f="discontinued">Discontinued</button>
+  </div>
+  <button class="key-btn" id="keyBtn" onclick="toggleKey()">⭐ Key Items</button>
+</div>
+
+<div class="charts-row">
+  <div class="chart-card">
+    <div class="chart-header">
+      <h3>Lowest Coverage</h3>
+      <div class="chart-pager">
+        <button class="pager-btn" onclick="shiftChart('lowCov',-1)" id="lowCov-prev">‹</button>
+        <span class="pager-label" id="lowCov-label">1 – 10</span>
+        <button class="pager-btn" onclick="shiftChart('lowCov',1)" id="lowCov-next">›</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="lowCovChart"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-header">
+      <h3>Highest Burn Rate</h3>
+      <div class="chart-pager">
+        <button class="pager-btn" onclick="shiftChart('burn',-1)" id="burn-prev">‹</button>
+        <span class="pager-label" id="burn-label">1 – 10</span>
+        <button class="pager-btn" onclick="shiftChart('burn',1)" id="burn-next">›</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="burnChart"></canvas></div>
+  </div>
+
+</div>
+
+<div class="legend">
+  <div class="li"><div class="ldot" style="background:var(--tpe)"></div>TPE (Taipei)</div>
+  <div class="li"><div class="ldot" style="background:var(--gol)"></div>Golden (US)</div>
+  <div class="li"><div class="ldot" style="background:var(--ham)"></div>Hamburg (DE)</div>
+  <div class="li"><div class="ldot" style="background:var(--jp)"></div>JP (Japan)</div>
+</div>
+
+<div class="table-meta" id="tableMeta"></div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th data-col="item_name">Product <span class="si">↕</span></th>
+        <th data-col="status">Status <span class="si">↕</span></th>
+        <th>Warehouses</th>
+        <th data-col="total_stock">Total Stock <span class="si">↕</span></th>
+        <th data-col="burn_rate">Burn Rate <span class="si">↕</span></th>
+        <th data-col="coverage_months">Coverage <span class="si">↕</span></th>
+        <th>ETA</th>
+        <th>Remarks</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="overlay" id="overlay" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="mhdr">
+      <div class="mtitle"><h2 id="mName"></h2><p id="mSub"></p></div>
+      <button class="mclose" onclick="closeModal()">✕</button>
+    </div>
+    <div class="mgrid" id="mKpis"></div>
+    <div class="mwh" id="mWh"></div>
+    <h3 style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px;font-weight:600;">Warehouse Breakdown</h3>
+    <div class="mchart-wrap"><canvas id="mChart"></canvas></div>
+    <div class="mremark" id="mRemark" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+// Sheet data loaded via published CSV URLs (see CSV_URLS below)
+// Direct published CSV URLs - no CORS issues, works from file:// too
+const CSV_URLS = {
+  fullInv:   'https://docs.google.com/spreadsheets/d/e/2PACX-1vQLnPP6_-jH25gkyCS9Be7r4YKxTgxvo2QFH3qpPzSZ2Az5PoW8uoB8tUkkzuokASTrJdJNM-PZ9WX8/pub?gid=653623390&single=true&output=csv',
+  retail:    'https://docs.google.com/spreadsheets/d/e/2PACX-1vQLnPP6_-jH25gkyCS9Be7r4YKxTgxvo2QFH3qpPzSZ2Az5PoW8uoB8tUkkzuokASTrJdJNM-PZ9WX8/pub?gid=451242368&single=true&output=csv',
+  wholesale: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQLnPP6_-jH25gkyCS9Be7r4YKxTgxvo2QFH3qpPzSZ2Az5PoW8uoB8tUkkzuokASTrJdJNM-PZ9WX8/pub?gid=744428677&single=true&output=csv',
+};
+
+
+const CATEGORIES = {"EG1":"Grinders","EG1-B":"Grinders","HG2_2":"Grinders","HG2B_2":"Grinders","KEY-2-B":"Grinders","KEY-2-W":"Grinders","KEY-B":"Grinders","KEY-W":"Grinders","MGS":"Grinders","PM1":"Grinders","PM1-B":"Grinders","PM1-S":"Grinders","MLC":"Accessories","WMM":"Grinders","RR1-B":"Brewers","BD1":"Brewers","BD1_A":"Brewers","BD1-PAPER":"Brewers","BD1-SIB":"Brewers","RNT":"Espresso Tools","RNT-B":"Espresso Tools","RNT-T":"Espresso Tools","RNT-OW":"Espresso Tools","RNT-49":"Espresso Tools","RNT-54":"Espresso Tools","RNT-B-49":"Espresso Tools","RNT-B-54":"Espresso Tools","RNT-T-49":"Espresso Tools","RNT-T-54":"Espresso Tools","RNT-OW-49":"Espresso Tools","RNT-OW-54":"Espresso Tools","BSH":"Espresso Tools","BSH-B":"Espresso Tools","BSH-2":"Espresso Tools","BSH-B-2":"Espresso Tools","BLT-B":"Espresso Tools","BLT-S":"Espresso Tools","BLT-S(old)":"Espresso Tools","PS-1":"Espresso Tools","PUCK_SAVER_58MM":"Espresso Tools","UNF-2-R":"Espresso Tools","UNF-2-T":"Espresso Tools","UNF-2-OW":"Espresso Tools","UNF-R":"Espresso Tools","UNF-T":"Espresso Tools","UNF-C":"Espresso Tools","UNF-DR":"Espresso Tools","UNF-DT":"Espresso Tools","UNF49-R":"Espresso Tools","UNF49-T":"Espresso Tools","UNB-20":"Espresso Tools","UNB-24":"Espresso Tools","UNB-28":"Espresso Tools","UNB-16":"Espresso Tools","UNB-B16":"Espresso Tools","UNB-B20":"Espresso Tools","UNB-B24":"Espresso Tools","UNB-B28":"Espresso Tools","EPF-55-100":"Espresso Tools","EPF-58-100":"Espresso Tools","PH":"Espresso Tools","PH-B":"Espresso Tools","STD":"Espresso Tools","SPC":"Espresso Tools","PSC-B":"Espresso Tools","MNR":"Espresso Tools","MNR-U":"Espresso Tools","MNR-M-M":"Espresso Tools","BCK-OW":"Espresso Tools","BCK-R":"Espresso Tools","BCK-W":"Espresso Tools","TPM-N":"Espresso Tools","TPM-B":"Espresso Tools","BNP":"Bean Storage","BNP-B":"Bean Storage","BNPS":"Bean Storage","BNPS-B":"Bean Storage","BNP-100":"Bean Storage","BNP-10-C":"Bean Storage","BNP-12-C":"Bean Storage","BNP-B10-C":"Bean Storage","BNP-B12-C":"Bean Storage","BNP-CD10":"Bean Storage","BNP-CD12":"Bean Storage","BNG":"Bean Storage","BNG-B":"Bean Storage","BNG-B2":"Bean Storage","BNG-SP":"Bean Storage","BCR20":"Bean Storage","BCR50":"Bean Storage","BCR100":"Bean Storage","BCR-C20":"Bean Storage","BCR-C50":"Bean Storage","BCR-C100":"Bean Storage","BCR-CD":"Bean Storage","CFB":"Accessories","BRT-H":"Accessories","BRT-N":"Accessories","BRT-B":"Accessories","BNF":"Accessories","MGT":"Accessories","MGT-B":"Accessories","MGT-L":"Accessories","MGT-L-B":"Accessories","MTWRK":"Accessories","EG1_CAS":"Accessories","KEY_CAS":"Accessories","BD1_CAS":"Accessories","BD1-NP":"Accessories","GNF-B":"Accessories","GNF-S":"Accessories","KEY-BNF":"Accessories","KEY-PLT-T":"Accessories","KEY-PLT-W":"Accessories","LKG":"Accessories","BC1":"Equipment","HGB":"Spare Parts","DB1":"Spare Parts","DB2":"Spare Parts","DB3":"Spare Parts","EG1-B-DB2":"Spare Parts","EG1-DB2":"Spare Parts","EG1_RFR":"Spare Parts","EGW-1":"Spare Parts","EG1-SS":"Spare Parts","EG1_PLT":"Spare Parts","EG1-FRS":"Spare Parts","BD1-GK":"Spare Parts","BD1-MS":"Spare Parts","BD1-SG":"Spare Parts","BD1_A_SG":"Spare Parts","HG2_CLP":"Spare Parts","HG2_GEAR/CRING":"Spare Parts","HGW":"Spare Parts","STD_ADT_ECM":"Spare Parts","STD_ADT_LAP":"Spare Parts","STD_ADT_CRM":"Spare Parts","STD_ADT_LDM":"Spare Parts","STD_ADT_DEC":"Spare Parts","STD_ADT_KEES":"Spare Parts","STD_ADT_CT_DEC":"Spare Parts","MNR-P-L":"Spare Parts","MNR-P-S":"Spare Parts","RNT_49KIT":"Spare Parts","RNT_54KIT":"Spare Parts","RNT_58 KIT":"Spare Parts","RNT-B_49KIT":"Spare Parts","RNT-B_54KIT":"Spare Parts","RNT-B_58 KIT":"Spare Parts","RNT-H-OW":"Spare Parts","RNT-H-T":"Spare Parts","BD1_TSH_XXL":"Merchandise","BD1_TSH_L":"Merchandise","BD1_TSH_M":"Merchandise","BD1_TSH_XL":"Merchandise","BD1_TSH_S":"Merchandise","BD1_TSH_150":"Merchandise","EG1_TSH_S":"Merchandise","EG1_TSH_M":"Merchandise","EG1_TSH_L":"Merchandise","EG1_TSH_XL":"Merchandise","EG1_TSH_XXL":"Merchandise","EG1_TSH_150":"Merchandise","TSH_BB_S":"Merchandise","TSH_BB_M":"Merchandise","TSH_BB_L":"Merchandise","TSH_BB_XL":"Merchandise","TSH_BB_XXL":"Merchandise","TSH_BB_150":"Merchandise","TSH_BB_160":"Merchandise","TSH_UKR-S":"Merchandise","TSH_UKR-M":"Merchandise","TSH_UKR-L":"Merchandise","TSH_UKR-XL":"Merchandise","TSH_100":"Merchandise","TSH_120":"Merchandise","TSH_140":"Merchandise"};
+
+const RETAIL_EXC = {"PSV-2":[["PUCK_SAVER_58MM",2]],"PSV-5":[["PUCK_SAVER_58MM",5]],"PSV-10":[["PUCK_SAVER_58MM",10]],"BD1-PAPER-3K":[["BD1-PAPER",10]],"PS-5":[["PS-1",5]],"EPF-55-1000":[["EPF-55-100",10]],"EPF-58-1000":[["EPF-58-100",10]],"EGW-2":[["EGW-1",2]],"EGW-3":[["EGW-1",4]],"BNP-10":[["BNP",10]],"BNP-12":[["BNP",12]],"BNP-50":[["BNP",50]],"BNP-100":[["BNP",100]],"GNF-T-B":[["GNF-B",1],["BLT-B",1]],"GNF-T-S":[["GNF-S",1],["BLT-S",1]],"HGB":[["HGB",1]],"MLC":[["MLC",1]],"PS-25":[["PS-1",25]],"BNP-B10":[["BNP-B",10]],"BNP-B12":[["BNP-B",12]],"BNP-B50":[["BNP-B",50]],"BNP-B100":[["BNP-B",100]],"BNPS-B50":[["BNPS-B",50]],"BNPS-50":[["BNPS",50]],"BNPS-B10":[["BNPS-B",10]],"BNPS-10":[["BNPS",10]],"BNPS-B12":[["BNPS-B",12]],"BNPS-12":[["BNPS",12]],"BNPS-B100":[["BNPS-B",100]],"BNPS-100":[["BNPS",100]],"SPC-DRRO":[["SPC",1]]};
+const WHOLESALE_EXC = {"PSV-100":[["PUCK_SAVER_58MM",100]],"BD1-PAPER":[["BD1-PAPER",300]],"PS-25":[["PS-1",25]],"EPF-55-100":[["EPF-55-100",100]],"EPF-58-100":[["EPF-58-100",100]],"EGW-2":[["EGW-1",2]],"EGW-3":[["EGW-1",4]],"BNP-10":[["BNP",10]],"BNP-12":[["BNP",12]],"BNP-50":[["BNP",50]],"BNP-100":[["BNP",100]],"GNF-T-B":[["GNF-B",1],["BLT-B",1]],"GNF-T-S":[["GNF-S",1],["BLT-S",1]],"HGB":[["HGB",1]],"MLC":[["MLC",1]],"BNP-B10":[["BNP-B",10]],"BNP-B12":[["BNP-B",12]],"BNP-B50":[["BNP-B",50]],"BNP-B100":[["BNP-B",100]],"BNPS-B50":[["BNPS-B",50]],"BNPS-50":[["BNPS",50]],"BNPS-B10":[["BNPS-B",10]],"BNPS-10":[["BNPS",10]],"BNPS-B12":[["BNPS-B",12]],"BNPS-12":[["BNPS",12]],"BNPS-B100":[["BNPS-B",100]],"BNPS-100":[["BNPS",100]],"SPC-DRRO":[["SPC",1]]};
+
+const STATUS_LABEL = {ok:'OK',critical:'Critical',low:'Low',new:'New',out_of_stock:'Out of Stock',discontinued:'Discontinued'};
+const STATUS_ORDER = {critical:0,out_of_stock:1,low:2,new:3,ok:4,discontinued:5};
+const STATUS_COLOR = {ok:'#16a34a',critical:'#dc2626',low:'#ca8a04',new:'#7c3aed',out_of_stock:'#64748b',discontinued:'#a8a29e'};
+
+const SNAPSHOT = [{"item_name": "Unibasket58mm - 24g", "model_name": "UNB-24", "bom": "YCXX00UNBA-05824", "remark": "Switch to new version, discontinue after sold out current stock", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Bean Cellar Bulk_100", "model_name": "BNP-100", "bom": "LSXX00BNPA-00100", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 50.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0, "status": "discontinued"}, {"item_name": "83mm Conical Burrs", "model_name": "HGB", "bom": "205300KEY2-A01MZ", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 18.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 1, "ww_gol": 4, "hamburg": 0, "jp": 0, "burn_rate": 1.56, "valid_months": 9, "stockout_excluded": 0, "total_stock": 5, "coverage_months": 3.21, "status": "low"}, {"item_name": "Bean Cellar Wall Rack_50", "model_name": "BCR50", "bom": "TSXX00BCRA-00050", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 72.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 1, "ww_gol": 0, "hamburg": 1, "jp": 0, "burn_rate": 1.0, "valid_months": 1, "stockout_excluded": 0, "total_stock": 2, "coverage_months": 2.0, "status": "discontinued"}, {"item_name": "BCK-OW", "model_name": "BCK-OW", "bom": "YCXX0BUCKB-000OW", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 83, "ww_gol": 16, "hamburg": 0, "jp": 5, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 104, "coverage_months": 0, "status": "new"}, {"item_name": "BCK-R", "model_name": "BCK-R", "bom": "YCXX0BUCKB-0000R", "remark": "Assembly in progress", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 494.5, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 5, "key_item": false, "tpe": 211, "ww_gol": 168, "hamburg": 0, "jp": 11, "burn_rate": 65.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 390, "coverage_months": 5.94, "status": "ok"}, {"item_name": "BCK-W", "model_name": "BCK-W", "bom": "YCXX0BUCKB-0000W", "remark": "Assembly in progress", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 534.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 5, "key_item": false, "tpe": 170, "ww_gol": 65, "hamburg": 32, "jp": 4, "burn_rate": 96.58, "valid_months": 12, "stockout_excluded": 0, "total_stock": 271, "coverage_months": 2.81, "status": "low"}, {"item_name": "BCR-Caddy", "model_name": "BCR-CD", "bom": "*270000BCRA-A08NR", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 83, "ww_gol": 60, "hamburg": 0, "jp": 1, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 144, "coverage_months": 0, "status": "new"}, {"item_name": "Bean Cellar Bulk", "model_name": "BNP", "bom": "1A0000BNPA-A01LS", "remark": "Place new PO 10,000 pcs", "eta": "6/5 4720 pcs", "launch_date": "", "category": "Bean Storage", "safety_stock": 18907.82, "wip": 0, "new_po": 10000, "in_transit": 5000, "wholesale_committed": 0, "key_item": true, "tpe": 6307, "ww_gol": 330, "hamburg": 656, "jp": 599, "burn_rate": 2854.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 7892, "coverage_months": 2.76, "status": "low"}, {"item_name": "Drink different _BD1_XXL", "model_name": "BD1_TSH_XXL", "bom": "BD1_TSH_XXL", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 18.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 2, "jp": 0, "burn_rate": 1.71, "valid_months": 7, "stockout_excluded": 0, "total_stock": 2, "coverage_months": 1.17, "status": "discontinued"}, {"item_name": "Bean Cellar Glass - Onyx (stabilze wood)", "model_name": "BNG-B2", "bom": "NRXX00BNGB-0000B", "remark": "", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 161.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": true, "tpe": 36, "ww_gol": 13, "hamburg": 2, "jp": 3, "burn_rate": 22.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 54, "coverage_months": 2.38, "status": "low"}, {"item_name": "Bean Cellar Glass - Teak&Brass", "model_name": "BNG", "bom": "NRXX00BNGB-00000", "remark": "", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 247.64, "wip": 0, "new_po": 0, "in_transit": 110, "wholesale_committed": 0, "key_item": false, "tpe": 121, "ww_gol": 1, "hamburg": 8, "jp": 6, "burn_rate": 37.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 136, "coverage_months": 3.61, "status": "low"}, {"item_name": "Bean Cellar Polymer Onyx", "model_name": "BNP-B", "bom": "1A0000BNPA-A02LS", "remark": "Place new PO 10,000 pcs", "eta": "5/18 4000 pcs", "launch_date": "", "category": "Bean Storage", "safety_stock": 9826.5, "wip": 0, "new_po": 20000, "in_transit": 0, "wholesale_committed": 0, "key_item": true, "tpe": 558, "ww_gol": 3194, "hamburg": 48, "jp": 152, "burn_rate": 1267.6, "valid_months": 10, "stockout_excluded": 0, "total_stock": 3952, "coverage_months": 3.12, "status": "low"}, {"item_name": "Bean Cellar Polymer Shorty-Onyx", "model_name": "BNPS-B", "bom": "1A0000BNPSA-A02LS", "remark": "Place new PO 10,000 pcs", "eta": "7/6 10000 pcs", "launch_date": "", "category": "Bean Storage", "safety_stock": 11012.0, "wip": 0, "new_po": 20000, "in_transit": 1550, "wholesale_committed": 0, "key_item": true, "tpe": 408, "ww_gol": 16, "hamburg": 250, "jp": 253, "burn_rate": 1198.4, "valid_months": 10, "stockout_excluded": 0, "total_stock": 927, "coverage_months": 0.77, "status": "critical"}, {"item_name": "Bean Cellar Polymer- Shorty", "model_name": "BNPS", "bom": "1A0000BNPSA-A01LS", "remark": "Place new PO 10,000 pcs", "eta": "7/31 10000 pcs", "launch_date": "", "category": "Bean Storage", "safety_stock": 10534.0, "wip": 0, "new_po": 35000, "in_transit": 2500, "wholesale_committed": 0, "key_item": true, "tpe": 1200, "ww_gol": 423, "hamburg": 294, "jp": 136, "burn_rate": 1404.6, "valid_months": 10, "stockout_excluded": 0, "total_stock": 2053, "coverage_months": 1.46, "status": "critical"}, {"item_name": "Bean Cellar Resin - 10 / Included", "model_name": "BNP-10-C", "bom": "YCXX00BNPA-0010C", "remark": "", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 76.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 52, "ww_gol": 33, "hamburg": 0, "jp": 1, "burn_rate": 8.5, "valid_months": 12, "stockout_excluded": 0, "total_stock": 86, "coverage_months": 10.12, "status": "ok"}, {"item_name": "Bean Cellar Resin - 12 / Included", "model_name": "BNP-12-C", "bom": "YCXX00BNPA-0012C", "remark": "Place new PO 200 pcs (cherry wood version)", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 111.43, "wip": 0, "new_po": 0, "in_transit": 45, "wholesale_committed": 0, "key_item": false, "tpe": 6, "ww_gol": 0, "hamburg": 0, "jp": 4, "burn_rate": 17.33, "valid_months": 12, "stockout_excluded": 0, "total_stock": 10, "coverage_months": 0.58, "status": "critical"}, {"item_name": "Unibasket58mm - 28g", "model_name": "UNB-28", "bom": "YCXX00UNBA-05828", "remark": "Switch to new version, discontinue after sold out current stock", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 121.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 2, "hamburg": 15, "jp": 13, "burn_rate": 20.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 30, "coverage_months": 1.47, "status": "discontinued"}, {"item_name": "Bean Cellar Resin - Black 10 / Included", "model_name": "BNP-B10-C", "bom": "YCXX00BNPA-0B10C", "remark": "", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 12.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 16, "ww_gol": 16, "hamburg": 0, "jp": 0, "burn_rate": 2.0, "valid_months": 4, "stockout_excluded": 0, "total_stock": 32, "coverage_months": 16.0, "status": "ok"}, {"item_name": "Bean Cellar Resin - Black 12 / Included", "model_name": "BNP-B12-C", "bom": "YCXX00BNPA-0B12C", "remark": "", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 43.2, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 12, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 8.33, "valid_months": 9, "stockout_excluded": 0, "total_stock": 12, "coverage_months": 1.44, "status": "critical"}, {"item_name": "Bean Cellar Spare Glass", "model_name": "BNG-SP", "bom": "NRXX00BNGA-000SP", "remark": "", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 39.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 7.5, "valid_months": 12, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0.0, "status": "out_of_stock"}, {"item_name": "Bean Cellar Wall Rack cherrywood_100", "model_name": "BCR-C100", "bom": "NRXX0BCRCA-00100", "remark": "Cherry wood version", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 30.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 36, "ww_gol": 28, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 64, "coverage_months": 0, "status": "out_of_stock"}, {"item_name": "Bean Cellar Wall Rack cherrywood_20", "model_name": "BCR-C20", "bom": "NRXX0BCRCA-00020", "remark": "Cherry wood version", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 12.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 12, "ww_gol": 10, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 22, "coverage_months": 0, "status": "out_of_stock"}, {"item_name": "Bean Cellar Wall Rack cherrywood_50", "model_name": "BCR-C50", "bom": "NRXX0BCRCA-00050", "remark": "Cherry wood version", "eta": "Mid May 30 pcs", "launch_date": "", "category": "Bean Storage", "safety_stock": 42.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 26, "ww_gol": 32, "hamburg": 0, "jp": 1, "burn_rate": 5.36, "valid_months": 11, "stockout_excluded": 0, "total_stock": 59, "coverage_months": 11.01, "status": "ok"}, {"item_name": "Bean Feeder for KEY", "model_name": "KEY-BNF", "bom": "WWXX00KEYA-00BNF", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 80.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 223, "ww_gol": 18, "hamburg": 0, "jp": 4, "burn_rate": 9.58, "valid_months": 12, "stockout_excluded": 0, "total_stock": 245, "coverage_months": 25.57, "status": "ok"}, {"item_name": "EG-1 Fork & Ring Set", "model_name": "EG1-FRS", "bom": "YCXX00EG1A-00FRS", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 12.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 2, "jp": 0, "burn_rate": 3.12, "valid_months": 8, "stockout_excluded": 0, "total_stock": 2, "coverage_months": 0.64, "status": "discontinued"}, {"item_name": "Bean Funnel", "model_name": "BNF", "bom": "205500BNGA-A01XF", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 212.75, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 146, "ww_gol": 137, "hamburg": 52, "jp": 28, "burn_rate": 30.0, "valid_months": 12, "stockout_excluded": 0, "total_stock": 363, "coverage_months": 12.1, "status": "ok"}, {"item_name": "BIRD", "model_name": "BD1", "bom": "YCXX0BIRDA-00000", "remark": "", "eta": "", "launch_date": "", "category": "Brewers", "safety_stock": 833.5, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 1, "key_item": false, "tpe": 1650, "ww_gol": 363, "hamburg": 20, "jp": 2, "burn_rate": 138.92, "valid_months": 12, "stockout_excluded": 0, "total_stock": 2035, "coverage_months": 14.65, "status": "ok"}, {"item_name": "BIRD Gasket Kit", "model_name": "BD1-GK", "bom": "BD1-GK", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 173.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 238, "ww_gol": 153, "hamburg": 22, "jp": 25, "burn_rate": 24.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 438, "coverage_months": 17.75, "status": "ok"}, {"item_name": "BIRD Metal Filter", "model_name": "BD1-MS", "bom": "1A000BIRDA-A01PM", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 256.57, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 411, "ww_gol": 12, "hamburg": 0, "jp": 20, "burn_rate": 34.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 443, "coverage_months": 12.87, "status": "ok"}, {"item_name": "Drink different _EG1_M", "model_name": "EG1_TSH_M", "bom": "EG1_TSH_M", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 12.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 3, "ww_gol": 0, "hamburg": 1, "jp": 0, "burn_rate": 1.2, "valid_months": 5, "stockout_excluded": 0, "total_stock": 4, "coverage_months": 3.33, "status": "discontinued"}, {"item_name": "Bean Cellar Wall Rack_20", "model_name": "BCR20", "bom": "TSXX00BCRA-00020", "remark": "Discontinue, switch to cherry wood version", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 23.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 6, "ww_gol": 0, "hamburg": 1, "jp": 0, "burn_rate": 2.4, "valid_months": 10, "stockout_excluded": 0, "total_stock": 7, "coverage_months": 2.92, "status": "discontinued"}, {"item_name": "BIRD Paper Filters - 300", "model_name": "BD1-PAPER", "bom": "1A000BIRDA-A02MA", "remark": "", "eta": "", "launch_date": "", "category": "Brewers", "safety_stock": 1301.82, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 370, "ww_gol": 472, "hamburg": 81, "jp": 61, "burn_rate": 124.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 984, "coverage_months": 7.89, "status": "ok"}, {"item_name": "BIRD Spare Glass", "model_name": "BD1-SG", "bom": "1A000BIRDA-A04MA", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 111.29, "wip": 0, "new_po": 0, "in_transit": 54, "wholesale_committed": 0, "key_item": false, "tpe": 105, "ww_gol": 48, "hamburg": 1, "jp": 3, "burn_rate": 14.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 157, "coverage_months": 10.7, "status": "ok"}, {"item_name": "Drink different _BD1_L", "model_name": "BD1_TSH_L", "bom": "BD1_TSH_L", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 36.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 7, "ww_gol": 6, "hamburg": 1, "jp": 0, "burn_rate": 2.2, "valid_months": 5, "stockout_excluded": 0, "total_stock": 14, "coverage_months": 6.36, "status": "discontinued"}, {"item_name": "BIRD Travel case", "model_name": "BD1_CAS", "bom": "200600BIRDA-A01LK", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 173.0, "wip": 0, "new_po": 0, "in_transit": 96, "wholesale_committed": 0, "key_item": false, "tpe": 167, "ww_gol": 24, "hamburg": 6, "jp": 3, "burn_rate": 21.27, "valid_months": 11, "stockout_excluded": 0, "total_stock": 200, "coverage_months": 9.4, "status": "ok"}, {"item_name": "BIRD Travel Sleeve", "model_name": "BD1-NP", "bom": "20610BIRDA-A01CAD", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 326.4, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 545, "ww_gol": 508, "hamburg": 30, "jp": 26, "burn_rate": 50.5, "valid_months": 12, "stockout_excluded": 0, "total_stock": 1109, "coverage_months": 21.96, "status": "ok"}, {"item_name": "BIRD_Glass", "model_name": "BD1_A", "bom": "MAXX0BIRDA-0000G", "remark": "", "eta": "", "launch_date": "", "category": "Brewers", "safety_stock": 448.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 201, "ww_gol": 717, "hamburg": 6, "jp": 8, "burn_rate": 23.0, "valid_months": 12, "stockout_excluded": 0, "total_stock": 932, "coverage_months": 40.52, "status": "ok"}, {"item_name": "BIRD_Glass Spare Glass", "model_name": "BD1_A_SG", "bom": "1A000BIRDA-B04MA", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 70.5, "wip": 0, "new_po": 0, "in_transit": 54, "wholesale_committed": 0, "key_item": false, "tpe": 102, "ww_gol": 8, "hamburg": 0, "jp": 6, "burn_rate": 8.75, "valid_months": 12, "stockout_excluded": 0, "total_stock": 116, "coverage_months": 13.26, "status": "ok"}, {"item_name": "Blind Shaker - Onyx", "model_name": "BSH-B", "bom": "WWXX00BSHA-0000B", "remark": "", "eta": "End of June 650 pcs", "launch_date": "", "category": "Espresso Tools", "safety_stock": 1317.0, "wip": 0, "new_po": 0, "in_transit": 630, "wholesale_committed": 8, "key_item": false, "tpe": 524, "ww_gol": 137, "hamburg": 25, "jp": 64, "burn_rate": 211.17, "valid_months": 12, "stockout_excluded": 0, "total_stock": 750, "coverage_months": 3.55, "status": "low"}, {"item_name": "Blind Shaker - Onyx- no magnet", "model_name": "BSH-B-2", "bom": "WWXX00BSHA-NOMGB", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 221.4, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 70, "ww_gol": 35, "hamburg": 3, "jp": 1, "burn_rate": 23.73, "valid_months": 11, "stockout_excluded": 0, "total_stock": 109, "coverage_months": 4.59, "status": "ok"}, {"item_name": "Blind Shaker - Silver", "model_name": "BSH", "bom": "WWXX00BSHA-00000", "remark": "", "eta": "End of June 500 pcs", "launch_date": "", "category": "Espresso Tools", "safety_stock": 833.5, "wip": 0, "new_po": 0, "in_transit": 270, "wholesale_committed": 9, "key_item": false, "tpe": 258, "ww_gol": 606, "hamburg": 52, "jp": 36, "burn_rate": 132.5, "valid_months": 12, "stockout_excluded": 0, "total_stock": 952, "coverage_months": 7.18, "status": "ok"}, {"item_name": "Blind Shaker - Silver- no magnet", "model_name": "BSH-2", "bom": "WWXX00BSHA-NOMG0", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 135.6, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 54, "ww_gol": 29, "hamburg": 8, "jp": 2, "burn_rate": 14.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 93, "coverage_months": 6.45, "status": "ok"}, {"item_name": "Spring Clean", "model_name": "SPC", "bom": "CYXX00SPCA-00000", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 26.4, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 14, "ww_gol": 2, "hamburg": 0, "jp": 3, "burn_rate": 5.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 19, "coverage_months": 3.35, "status": "discontinued"}, {"item_name": "Blind Tumbler - Onyx", "model_name": "BLT-B", "bom": "WWXX00BLTA-0000B", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 66.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 93, "ww_gol": 114, "hamburg": 44, "jp": 5, "burn_rate": 7.33, "valid_months": 12, "stockout_excluded": 0, "total_stock": 256, "coverage_months": 34.92, "status": "ok"}, {"item_name": "Blind Tumbler - Silver", "model_name": "BLT-S", "bom": "WWXX00BLTA-00000", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 44.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 56, "ww_gol": 28, "hamburg": 46, "jp": 8, "burn_rate": 8.17, "valid_months": 12, "stockout_excluded": 0, "total_stock": 138, "coverage_months": 16.89, "status": "ok"}, {"item_name": "BNP-Caddy 10", "model_name": "BNP-CD10", "bom": "270000BNPA-A03NR", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 50, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 50, "coverage_months": 0, "status": "new"}, {"item_name": "BNP-Caddy 12", "model_name": "BNP-CD12", "bom": "270000BNPA-A04NR", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 50, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 50, "coverage_months": 0, "status": "new"}, {"item_name": "Brew Boldly Tread Lightly 150", "model_name": "TSH_BB_150", "bom": "TSH_BB_150", "remark": "", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 6.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2, "ww_gol": 6, "hamburg": 2, "jp": 0, "burn_rate": 1.0, "valid_months": 1, "stockout_excluded": 0, "total_stock": 10, "coverage_months": 10.0, "status": "ok"}, {"item_name": "Brew Boldly Tread Lightly 160", "model_name": "TSH_BB_160", "bom": "TSH_BB_160", "remark": "", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 3, "ww_gol": 5, "hamburg": 3, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 11, "coverage_months": 0, "status": "out_of_stock"}, {"item_name": "Drink different _EG1_L", "model_name": "EG1_TSH_L", "bom": "EG1_TSH_L", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 4.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 2, "hamburg": 2, "jp": 0, "burn_rate": 1.17, "valid_months": 6, "stockout_excluded": 0, "total_stock": 4, "coverage_months": 3.42, "status": "discontinued"}, {"item_name": "Brew Boldly Tread Lightly L", "model_name": "TSH_BB_L", "bom": "TSH_BB_L", "remark": "", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 15.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 15, "hamburg": 6, "jp": 0, "burn_rate": 1.67, "valid_months": 3, "stockout_excluded": 1, "total_stock": 21, "coverage_months": 12.57, "status": "ok"}, {"item_name": "Bean Cellar Glass - Onyx", "model_name": "BNG-B", "bom": "NRXX00BNGA-0000B", "remark": "Discontinue. Switch to stabilze wood version", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 17.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": true, "tpe": 1, "ww_gol": 45, "hamburg": 3, "jp": 2, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 51, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Brew Boldly Tread Lightly M", "model_name": "TSH_BB_M", "bom": "TSH_BB_M", "remark": "", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 15.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 4, "ww_gol": 19, "hamburg": 8, "jp": 0, "burn_rate": 2.0, "valid_months": 2, "stockout_excluded": 0, "total_stock": 31, "coverage_months": 15.5, "status": "ok"}, {"item_name": "Brew Boldly Tread Lightly XXL", "model_name": "TSH_BB_XXL", "bom": "TSH_BB_XXL", "remark": "", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 9.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 8, "hamburg": 5, "jp": 0, "burn_rate": 1.5, "valid_months": 4, "stockout_excluded": 0, "total_stock": 13, "coverage_months": 8.67, "status": "ok"}, {"item_name": "Cleaning Brush Tips - Horse", "model_name": "BRT-H", "bom": "WWXX00BRTA-0000H", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 39.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 54, "ww_gol": 21, "hamburg": 1, "jp": 41, "burn_rate": 7.0, "valid_months": 12, "stockout_excluded": 0, "total_stock": 117, "coverage_months": 16.71, "status": "ok"}, {"item_name": "Cleaning Brush Tips - Nylon", "model_name": "BRT-N", "bom": "WWXX00BRTA-0000N", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 19.5, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 37, "ww_gol": 6, "hamburg": 7, "jp": 3, "burn_rate": 2.25, "valid_months": 8, "stockout_excluded": 0, "total_stock": 53, "coverage_months": 23.56, "status": "ok"}, {"item_name": "Coffee Brush", "model_name": "CFB", "bom": "WWXX00CFBA-00000", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 222.14, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 208, "ww_gol": 92, "hamburg": 11, "jp": 22, "burn_rate": 29.5, "valid_months": 12, "stockout_excluded": 0, "total_stock": 333, "coverage_months": 11.29, "status": "ok"}, {"item_name": "EG-1 Burrs_DB1", "model_name": "DB1", "bom": "WWXX00DB1A-0CORE", "remark": "", "eta": "End of April 400 pcs", "launch_date": "", "category": "Spare Parts", "safety_stock": 91.71, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 2, "key_item": false, "tpe": 201, "ww_gol": 7, "hamburg": 20, "jp": 2, "burn_rate": 13.33, "valid_months": 12, "stockout_excluded": 0, "total_stock": 230, "coverage_months": 17.25, "status": "ok"}, {"item_name": "EG-1 Burrs_DB2", "model_name": "DB2", "bom": "WWXX00DB2A-00SSP", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 153.09, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 2, "key_item": false, "tpe": 149, "ww_gol": 28, "hamburg": 30, "jp": 3, "burn_rate": 28.0, "valid_months": 12, "stockout_excluded": 0, "total_stock": 210, "coverage_months": 7.5, "status": "ok"}, {"item_name": "EG-1 Oak Platen", "model_name": "EG1_PLT", "bom": "YCXX00EG1A-00PLT", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 19.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 4, "hamburg": 2, "jp": 1, "burn_rate": 2.0, "valid_months": 11, "stockout_excluded": 0, "total_stock": 7, "coverage_months": 3.5, "status": "low"}, {"item_name": "EG-1 Refresh Kit", "model_name": "EG1_RFR", "bom": "YCXX00EG1A-00RFR", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 213.67, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 3, "key_item": false, "tpe": 323, "ww_gol": 183, "hamburg": 45, "jp": 11, "burn_rate": 30.17, "valid_months": 12, "stockout_excluded": 0, "total_stock": 562, "coverage_months": 18.63, "status": "ok"}, {"item_name": "EG-1 Spare Wipers - 05", "model_name": "EGW-1", "bom": "WWXX00EGWA-00005", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 283.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 216, "ww_gol": 406, "hamburg": 49, "jp": 41, "burn_rate": 40.17, "valid_months": 12, "stockout_excluded": 0, "total_stock": 712, "coverage_months": 17.72, "status": "ok"}, {"item_name": "Drink different _EG1_XL", "model_name": "EG1_TSH_XL", "bom": "EG1_TSH_XL", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 35.4, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 18, "ww_gol": 2, "hamburg": 6, "jp": 0, "burn_rate": 2.58, "valid_months": 12, "stockout_excluded": 0, "total_stock": 26, "coverage_months": 10.08, "status": "discontinued"}, {"item_name": "EG-1 Stainless Internal Chute Wipers", "model_name": "EG1-SS", "bom": "EG1_SHAFT_SPRING", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 35.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 130, "ww_gol": 35, "hamburg": 10, "jp": 14, "burn_rate": 3.92, "valid_months": 12, "stockout_excluded": 0, "total_stock": 189, "coverage_months": 48.21, "status": "ok"}, {"item_name": "Make Coffee, Not War - S", "model_name": "TSH_UKR-S", "bom": "WWXX00TSHA-0UKRS", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 6.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 3, "ww_gol": 0, "hamburg": 0, "jp": 2, "burn_rate": 1.0, "valid_months": 2, "stockout_excluded": 0, "total_stock": 5, "coverage_months": 5.0, "status": "discontinued"}, {"item_name": "EG1-B-DB2", "model_name": "EG1-B-DB2", "bom": "YCXX00EG1A-0DB2B", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 80.29, "wip": 0, "new_po": 0, "in_transit": 18, "wholesale_committed": 0, "key_item": true, "tpe": 6, "ww_gol": 18, "hamburg": 0, "jp": 1, "burn_rate": 11.58, "valid_months": 12, "stockout_excluded": 0, "total_stock": 25, "coverage_months": 2.16, "status": "low"}, {"item_name": "Drink different _BD1_M", "model_name": "BD1_TSH_M", "bom": "BD1_TSH_M", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 9.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2, "ww_gol": 4, "hamburg": 2, "jp": 0, "burn_rate": 1.5, "valid_months": 2, "stockout_excluded": 0, "total_stock": 8, "coverage_months": 5.33, "status": "discontinued"}, {"item_name": "EG1-DB2", "model_name": "EG1-DB2", "bom": "YCXX00EG1A-0DB20", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 52.0, "wip": 0, "new_po": 0, "in_transit": 5, "wholesale_committed": 3, "key_item": true, "tpe": 0, "ww_gol": 3, "hamburg": 0, "jp": 1, "burn_rate": 6.08, "valid_months": 12, "stockout_excluded": 0, "total_stock": 4, "coverage_months": 0.66, "status": "critical"}, {"item_name": "EPF Dock Onyx", "model_name": "PH-B", "bom": "YCXX000PHA-0000B", "remark": "", "eta": "Elary June 70, Early July 330", "launch_date": "", "category": "Espresso Tools", "safety_stock": 304.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 93, "ww_gol": 131, "hamburg": 17, "jp": 17, "burn_rate": 49.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 258, "coverage_months": 5.22, "status": "ok"}, {"item_name": "EPF Dock Silver", "model_name": "PH", "bom": "YCXX000PHA-00000", "remark": "Plaace new order 200 pcs", "eta": "Ealry June 50, Early July 150", "launch_date": "", "category": "Espresso Tools", "safety_stock": 124.73, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 17, "ww_gol": 24, "hamburg": 24, "jp": 10, "burn_rate": 18.25, "valid_months": 12, "stockout_excluded": 0, "total_stock": 75, "coverage_months": 4.11, "status": "ok"}, {"item_name": "EPF-55-100", "model_name": "EPF-55-100", "bom": "WWXXEPF55A-00100", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 4376.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2753, "ww_gol": 920, "hamburg": 608, "jp": 848, "burn_rate": 632.75, "valid_months": 12, "stockout_excluded": 0, "total_stock": 5129, "coverage_months": 8.11, "status": "ok"}, {"item_name": "EPF-58-100", "model_name": "EPF-58-100", "bom": "WWXXEPF58A-00100", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 5794.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2312, "ww_gol": 188, "hamburg": 128, "jp": 850, "burn_rate": 894.33, "valid_months": 12, "stockout_excluded": 0, "total_stock": 3478, "coverage_months": 3.89, "status": "low"}, {"item_name": "Grounds Funnel - Onyx", "model_name": "GNF-B", "bom": "YCXX00GNFA-0000B", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 50.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 55, "ww_gol": 39, "hamburg": 10, "jp": 5, "burn_rate": 6.33, "valid_months": 12, "stockout_excluded": 0, "total_stock": 109, "coverage_months": 17.22, "status": "ok"}, {"item_name": "Grounds Funnel - Silver", "model_name": "GNF-S", "bom": "YCXX00GNFA-00000", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 29.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 38, "ww_gol": 44, "hamburg": 6, "jp": 5, "burn_rate": 5.0, "valid_months": 11, "stockout_excluded": 0, "total_stock": 93, "coverage_months": 18.6, "status": "ok"}, {"item_name": "HG-2 Clear Gearbox Panels", "model_name": "HG2_CLP", "bom": "WWXX00HG2A-00CLP", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 33.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 54, "ww_gol": 4, "hamburg": 4, "jp": 4, "burn_rate": 3.45, "valid_months": 11, "stockout_excluded": 0, "total_stock": 66, "coverage_months": 19.13, "status": "ok"}, {"item_name": "HG-2 Repair gear set w/C-ring", "model_name": "HG2_GEAR/CRING", "bom": "WWXX00HG2A-0GEAR", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 6.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 5, "ww_gol": 5, "hamburg": 2, "jp": 0, "burn_rate": 1.0, "valid_months": 3, "stockout_excluded": 0, "total_stock": 12, "coverage_months": 12.0, "status": "ok"}, {"item_name": "KEY-PLT-T", "model_name": "KEY-PLT-T", "bom": "1A0000KEY2-A25SC", "remark": "", "eta": "5/8 30 pcs", "launch_date": "", "category": "Accessories", "safety_stock": 40.8, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 56, "ww_gol": 14, "hamburg": 6, "jp": 3, "burn_rate": 1.7, "valid_months": 10, "stockout_excluded": 0, "total_stock": 79, "coverage_months": 46.47, "status": "ok"}, {"item_name": "KEY-PLT-W", "model_name": "KEY-PLT-W", "bom": "1A0000KEY2-A26SC", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 76.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 74, "ww_gol": 8, "hamburg": 0, "jp": 3, "burn_rate": 6.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 85, "coverage_months": 13.24, "status": "ok"}, {"item_name": "Leather Tamping Mat - Natural", "model_name": "TPM-N", "bom": "WWXX00TPMA-0000N", "remark": "Place new order 200 pcs, researching new supplier.", "eta": "End of June 200 pcs", "launch_date": "", "category": "Espresso Tools", "safety_stock": 391.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 126, "ww_gol": 141, "hamburg": 67, "jp": 38, "burn_rate": 57.25, "valid_months": 12, "stockout_excluded": 0, "total_stock": 372, "coverage_months": 6.5, "status": "ok"}, {"item_name": "Leather Tamping Mat - ONYX", "model_name": "TPM-B", "bom": "WWXX00TPMA-0000B", "remark": "Place new order 400 pcs, researching new supplier.", "eta": "End of June 400 pcs", "launch_date": "", "category": "Espresso Tools", "safety_stock": 452.73, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 54, "ww_gol": 87, "hamburg": 23, "jp": 39, "burn_rate": 65.58, "valid_months": 12, "stockout_excluded": 0, "total_stock": 203, "coverage_months": 3.1, "status": "low"}, {"item_name": "Looking Glass", "model_name": "LKG", "bom": "WWXX00LKGA-00000", "remark": "", "eta": "5/8 400 pcs", "launch_date": "", "category": "Accessories", "safety_stock": 323.33, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 357, "ww_gol": 116, "hamburg": 12, "jp": 20, "burn_rate": 49.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 505, "coverage_months": 10.22, "status": "ok"}, {"item_name": "LYKUS_CASE_EG1", "model_name": "EG1_CAS", "bom": "200600EG1A-A01LK", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 42.0, "wip": 0, "new_po": 0, "in_transit": 40, "wholesale_committed": 0, "key_item": false, "tpe": 78, "ww_gol": 20, "hamburg": 0, "jp": 1, "burn_rate": 6.17, "valid_months": 12, "stockout_excluded": 0, "total_stock": 99, "coverage_months": 16.05, "status": "ok"}, {"item_name": "LYKUS_CASE_KEY", "model_name": "KEY_CAS", "bom": "200600KEYA-A01LK", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 41.0, "wip": 0, "new_po": 0, "in_transit": 10, "wholesale_committed": 0, "key_item": false, "tpe": 112, "ww_gol": 22, "hamburg": 0, "jp": 0, "burn_rate": 4.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 134, "coverage_months": 28.69, "status": "ok"}, {"item_name": "Magic Tumbler - Black", "model_name": "MGT-B", "bom": "WWXX00MGTA-0000B", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 27.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 102, "ww_gol": 20, "hamburg": 0, "jp": 5, "burn_rate": 4.5, "valid_months": 12, "stockout_excluded": 0, "total_stock": 127, "coverage_months": 28.22, "status": "ok"}, {"item_name": "Magic Tumbler - Silver", "model_name": "MGT", "bom": "WWXX00MGTA-00000", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 41.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 93, "ww_gol": 34, "hamburg": 22, "jp": 5, "burn_rate": 5.08, "valid_months": 12, "stockout_excluded": 0, "total_stock": 154, "coverage_months": 30.31, "status": "ok"}, {"item_name": "MGT special pack for KEYV1 inventory", "model_name": "MTWRK", "bom": "MGT special pack for KEYV1 inventory", "remark": "", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 62.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 119, "ww_gol": 19, "hamburg": 18, "jp": 6, "burn_rate": 9.0, "valid_months": 12, "stockout_excluded": 0, "total_stock": 162, "coverage_months": 18.0, "status": "ok"}, {"item_name": "MNR-P-L", "model_name": "MNR-P-L", "bom": "YCXX0MWDTA-0PINL", "remark": "New pin material in production.", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 195.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 1, "key_item": false, "tpe": 61, "ww_gol": 11, "hamburg": 10, "jp": 28, "burn_rate": 26.25, "valid_months": 12, "stockout_excluded": 0, "total_stock": 110, "coverage_months": 4.19, "status": "ok"}, {"item_name": "MNR-P-S", "model_name": "MNR-P-S", "bom": "YCXX0MWDTA-0PINS", "remark": "New pin material in production.", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 321.67, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 24, "ww_gol": 5, "hamburg": 27, "jp": 14, "burn_rate": 39.25, "valid_months": 12, "stockout_excluded": 0, "total_stock": 70, "coverage_months": 1.78, "status": "critical"}, {"item_name": "MOONRAKER™ - Standard", "model_name": "MNR", "bom": "YCXX0MWDTA-00000", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 451.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 2, "key_item": false, "tpe": 857, "ww_gol": 156, "hamburg": 5, "jp": 4, "burn_rate": 63.08, "valid_months": 12, "stockout_excluded": 0, "total_stock": 1022, "coverage_months": 16.2, "status": "ok"}, {"item_name": "MOONRAKER™ - Ultra", "model_name": "MNR-U", "bom": "YCXX0MWDTA-0000B", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 380.27, "wip": 0, "new_po": 0, "in_transit": 160, "wholesale_committed": 0, "key_item": false, "tpe": 175, "ww_gol": 15, "hamburg": 20, "jp": 3, "burn_rate": 59.5, "valid_months": 12, "stockout_excluded": 0, "total_stock": 213, "coverage_months": 3.58, "status": "low"}, {"item_name": "Moulin Caddy", "model_name": "MLC", "bom": "DYXX00MLCA-00000", "remark": "Assembled upon request", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 18.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 16, "hamburg": 0, "jp": 0, "burn_rate": 2.43, "valid_months": 7, "stockout_excluded": 2, "total_stock": 16, "coverage_months": 6.58, "status": "ok"}, {"item_name": "Moulin Grinders Set", "model_name": "MGS", "bom": "DYXX00MGSA-00000", "remark": "", "eta": "Mid May 86 sets", "launch_date": "", "category": "Grinders", "safety_stock": 270.0, "wip": 0, "new_po": 500, "in_transit": 20, "wholesale_committed": 0, "key_item": true, "tpe": 13, "ww_gol": 14, "hamburg": 8, "jp": 4, "burn_rate": 34.5, "valid_months": 12, "stockout_excluded": 0, "total_stock": 39, "coverage_months": 1.13, "status": "critical"}, {"item_name": "Moulin Pepper Grinder_Black", "model_name": "PM1-B", "bom": "DYXX00PM1A-0000B", "remark": "", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 65.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 39, "ww_gol": 0, "hamburg": 4, "jp": 3, "burn_rate": 7.58, "valid_months": 12, "stockout_excluded": 0, "total_stock": 46, "coverage_months": 6.07, "status": "ok"}, {"item_name": "Moulin Pepper Grinder_Silver", "model_name": "PM1", "bom": "DYXX00PM1A-00000", "remark": "", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 18.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 81, "ww_gol": 12, "hamburg": 0, "jp": 3, "burn_rate": 2.17, "valid_months": 12, "stockout_excluded": 0, "total_stock": 96, "coverage_months": 44.24, "status": "ok"}, {"item_name": "Moulin Salt Grinder", "model_name": "PM1-S", "bom": "DYXX00PM1A-0000S", "remark": "", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 33.6, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 94, "ww_gol": 6, "hamburg": 0, "jp": 5, "burn_rate": 4.22, "valid_months": 9, "stockout_excluded": 1, "total_stock": 105, "coverage_months": 24.88, "status": "ok"}, {"item_name": "HG-1 Funnel Wiper", "model_name": "HGW", "bom": "WWXX00HGWA-00000", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 25.5, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 17, "ww_gol": 17, "hamburg": 7, "jp": 0, "burn_rate": 3.5, "valid_months": 8, "stockout_excluded": 0, "total_stock": 41, "coverage_months": 11.71, "status": "discontinued"}, {"item_name": "Polymer Spring Clean", "model_name": "PSC-B", "bom": "KJXX00PSCB-00000", "remark": "Place new order 1000 pcs", "eta": "End of June 300 pcs", "launch_date": "", "category": "Espresso Tools", "safety_stock": 1127.5, "wip": 0, "new_po": 1000, "in_transit": 120, "wholesale_committed": 11, "key_item": false, "tpe": 493, "ww_gol": 138, "hamburg": 0, "jp": 11, "burn_rate": 174.83, "valid_months": 12, "stockout_excluded": 0, "total_stock": 642, "coverage_months": 3.67, "status": "low"}, {"item_name": "Puck Screens_1", "model_name": "PS-1", "bom": "WWXX000PSA-00001", "remark": "", "eta": "Early May 2500 pcs to USA", "launch_date": "", "category": "Espresso Tools", "safety_stock": 2947.33, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2197, "ww_gol": 2590, "hamburg": 255, "jp": 87, "burn_rate": 399.17, "valid_months": 12, "stockout_excluded": 0, "total_stock": 5129, "coverage_months": 12.85, "status": "ok"}, {"item_name": "PUCK_SAVER_58MM", "model_name": "PUCK_SAVER_58MM", "bom": "PUCK_SAVER_58MM", "remark": "In stock at YC, transferable if needed", "eta": "Early May 2000 pcs to USA", "launch_date": "", "category": "Espresso Tools", "safety_stock": 2538.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2423, "ww_gol": 3264, "hamburg": 337, "jp": 438, "burn_rate": 420.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 6462, "coverage_months": 15.37, "status": "ok"}, {"item_name": "Really Nice Tamper Onyx", "model_name": "RNT-B", "bom": "MBXX00RNTA-0000B", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 1144.5, "wip": 0, "new_po": 0, "in_transit": 750, "wholesale_committed": 5, "key_item": false, "tpe": 3937, "ww_gol": 146, "hamburg": 24, "jp": 54, "burn_rate": 211.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 4161, "coverage_months": 19.68, "status": "ok"}, {"item_name": "Really Nice Tamper Onyx wood", "model_name": "RNT-OW", "bom": "SCXX00RNTA-0000M", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 505.0, "wip": 0, "new_po": 1500, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 174, "ww_gol": 144, "hamburg": 0, "jp": 7, "burn_rate": 73.0, "valid_months": 7, "stockout_excluded": 0, "total_stock": 325, "coverage_months": 4.45, "status": "ok"}, {"item_name": "Really Nice Tamper Onyx Wood-49mm", "model_name": "RNT-OW-49", "bom": "RNT-OW-49", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 28.0, "wip": 0, "new_po": 75, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2, "ww_gol": 1, "hamburg": 0, "jp": 0, "burn_rate": 4.67, "valid_months": 3, "stockout_excluded": 0, "total_stock": 3, "coverage_months": 0.64, "status": "critical"}, {"item_name": "Make Coffee, Not War - 100", "model_name": "TSH_100", "bom": "WWXX00TSHA-00100", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 3, "ww_gol": 0, "hamburg": 0, "jp": 10, "burn_rate": 1.0, "valid_months": 1, "stockout_excluded": 0, "total_stock": 13, "coverage_months": 13.0, "status": "discontinued"}, {"item_name": "Really Nice Tamper Onyx Wood-54mm", "model_name": "RNT-OW-54", "bom": "RNT-OW-54", "remark": "Assembled upon request", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 16.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 4, "ww_gol": 3, "hamburg": 0, "jp": 0, "burn_rate": 2.0, "valid_months": 3, "stockout_excluded": 0, "total_stock": 7, "coverage_months": 3.5, "status": "low"}, {"item_name": "Really Nice Tamper Onyx-49mm", "model_name": "RNT-B-49", "bom": "RNT-B-49", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 59.0, "wip": 0, "new_po": 75, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 12, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 9.33, "valid_months": 3, "stockout_excluded": 0, "total_stock": 12, "coverage_months": 1.29, "status": "critical"}, {"item_name": "Really Nice Tamper Onyx-54mm", "model_name": "RNT-B-54", "bom": "RNT-B-54", "remark": "Assembled upon request", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 136.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 11.33, "valid_months": 3, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0.0, "status": "out_of_stock"}, {"item_name": "Really Nice Tamper Silver", "model_name": "RNT", "bom": "MBXX00RNTA-00000", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 6, "key_item": false, "tpe": 964, "ww_gol": 369, "hamburg": 41, "jp": 19, "burn_rate": 95.42, "valid_months": 12, "stockout_excluded": 0, "total_stock": 1393, "coverage_months": 14.6, "status": "ok"}, {"item_name": "Really Nice Tamper Silver-49mm", "model_name": "RNT-49", "bom": "RNT-49", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 20.0, "wip": 0, "new_po": 75, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 1, "ww_gol": 4, "hamburg": 0, "jp": 0, "burn_rate": 2.67, "valid_months": 3, "stockout_excluded": 0, "total_stock": 5, "coverage_months": 1.87, "status": "critical"}, {"item_name": "Drink different _EG1_S", "model_name": "EG1_TSH_S", "bom": "EG1_TSH_S", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 6.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 10, "ww_gol": 4, "hamburg": 1, "jp": 0, "burn_rate": 1.0, "valid_months": 1, "stockout_excluded": 0, "total_stock": 15, "coverage_months": 15.0, "status": "discontinued"}, {"item_name": "Really Nice Tamper Silver-54mm", "model_name": "RNT-54", "bom": "RNT-54", "remark": "Assembled upon request", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 118.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 3, "hamburg": 0, "jp": 0, "burn_rate": 8.33, "valid_months": 3, "stockout_excluded": 0, "total_stock": 3, "coverage_months": 0.36, "status": "critical"}, {"item_name": "Really Nice Tamper Teak", "model_name": "RNT-T", "bom": "SCXX00RNTA-0000T", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 558.0, "wip": 0, "new_po": 2000, "in_transit": 0, "wholesale_committed": 1, "key_item": false, "tpe": 121, "ww_gol": 97, "hamburg": 0, "jp": 10, "burn_rate": 75.57, "valid_months": 7, "stockout_excluded": 0, "total_stock": 228, "coverage_months": 3.02, "status": "low"}, {"item_name": "Really Nice Tamper Teak-49mm", "model_name": "RNT-T-49", "bom": "RNT-T-49", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 44.0, "wip": 0, "new_po": 75, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2, "ww_gol": 1, "hamburg": 0, "jp": 0, "burn_rate": 6.67, "valid_months": 3, "stockout_excluded": 0, "total_stock": 3, "coverage_months": 0.45, "status": "critical"}, {"item_name": "Really Nice Tamper Teak-54mm", "model_name": "RNT-T-54", "bom": "RNT-T-54", "remark": "Assembled upon request", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 24.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 2.0, "valid_months": 2, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0.0, "status": "out_of_stock"}, {"item_name": "RNT Handle-Onyx wood", "model_name": "RNT-H-OW", "bom": "SCXX00RNTA-000MK", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 194.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 250, "ww_gol": 12, "hamburg": 0, "jp": 4, "burn_rate": 29.67, "valid_months": 3, "stockout_excluded": 0, "total_stock": 266, "coverage_months": 8.97, "status": "new"}, {"item_name": "RNT Handle-Teak", "model_name": "RNT-H-T", "bom": "SCXX00RNTA-000TK", "remark": "TPE stock handle rewoking", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 260.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 361, "ww_gol": 16, "hamburg": 0, "jp": 5, "burn_rate": 38.0, "valid_months": 3, "stockout_excluded": 0, "total_stock": 382, "coverage_months": 10.05, "status": "ok"}, {"item_name": "RNT_49KIT", "model_name": "RNT_49KIT", "bom": "SCXX00RNTA-00049", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 80.0, "wip": 0, "new_po": 50, "in_transit": 0, "wholesale_committed": 1, "key_item": false, "tpe": 0, "ww_gol": 24, "hamburg": 0, "jp": 5, "burn_rate": 11.33, "valid_months": 3, "stockout_excluded": 0, "total_stock": 29, "coverage_months": 2.56, "status": "low"}, {"item_name": "Bean Cellar Wall Rack_100", "model_name": "BCR100", "bom": "TSXX00BCRA-00100", "remark": "Discontinue, switch to cherry wood version", "eta": "", "launch_date": "", "category": "Bean Storage", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2, "ww_gol": 13, "hamburg": 1, "jp": 0, "burn_rate": 0.75, "valid_months": 4, "stockout_excluded": 0, "total_stock": 16, "coverage_months": 21.33, "status": "discontinued"}, {"item_name": "RNT_54KIT", "model_name": "RNT_54KIT", "bom": "SCXX00RNTA-00054", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 18.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 136, "ww_gol": 67, "hamburg": 0, "jp": 7, "burn_rate": 3.0, "valid_months": 2, "stockout_excluded": 0, "total_stock": 210, "coverage_months": 70.0, "status": "new"}, {"item_name": "Make Coffee, Not War - 140", "model_name": "TSH_140", "bom": "WWXX00TSHA-00140", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 4, "ww_gol": 0, "hamburg": 0, "jp": 13, "burn_rate": 1.0, "valid_months": 1, "stockout_excluded": 0, "total_stock": 17, "coverage_months": 17.0, "status": "discontinued"}, {"item_name": "RNT_58 KIT", "model_name": "RNT_58 KIT", "bom": "SCXX00RNTA-0058B", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 90, "ww_gol": 0, "hamburg": 0, "jp": 5, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 95, "coverage_months": 0, "status": "new"}, {"item_name": "RNT-B_49KIT", "model_name": "RNT-B_49KIT", "bom": "SCXX00RNTA-0049B", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 112.0, "wip": 0, "new_po": 50, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 12, "ww_gol": 25, "hamburg": 0, "jp": 7, "burn_rate": 16.67, "valid_months": 3, "stockout_excluded": 0, "total_stock": 44, "coverage_months": 2.64, "status": "low"}, {"item_name": "MGT-L-B", "model_name": "MGT-L-B", "bom": "1A0000MGTA-A02SC", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 111.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 198, "ww_gol": 56, "hamburg": 87, "jp": 20, "burn_rate": 19.83, "valid_months": 12, "stockout_excluded": 0, "total_stock": 361, "coverage_months": 18.2, "status": "discontinued"}, {"item_name": "RNT-B_54KIT", "model_name": "RNT-B_54KIT", "bom": "SCXX00RNTA-0054B", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 30.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 333, "ww_gol": 65, "hamburg": 0, "jp": 7, "burn_rate": 5.0, "valid_months": 2, "stockout_excluded": 0, "total_stock": 405, "coverage_months": 81.0, "status": "new"}, {"item_name": "RNT-B_58 KIT", "model_name": "RNT-B_58 KIT", "bom": "SCXX00RNTA-00058", "remark": "Newly Launched Product", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 42, "ww_gol": 0, "hamburg": 0, "jp": 5, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 47, "coverage_months": 0, "status": "new"}, {"item_name": "Road Runner", "model_name": "RR1-B", "bom": "MBXXBIRDPA-000PB", "remark": "", "eta": "", "launch_date": "", "category": "Brewers", "safety_stock": 1674.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 640, "ww_gol": 909, "hamburg": 18, "jp": 8, "burn_rate": 286.5, "valid_months": 4, "stockout_excluded": 0, "total_stock": 1575, "coverage_months": 5.5, "status": "ok"}, {"item_name": "Drink different _BD1_XL", "model_name": "BD1_TSH_XL", "bom": "BD1_TSH_XL", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 20.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 21, "ww_gol": 38, "hamburg": 3, "jp": 0, "burn_rate": 1.71, "valid_months": 7, "stockout_excluded": 0, "total_stock": 62, "coverage_months": 36.26, "status": "discontinued"}, {"item_name": "STD_ADT_CT_DEC", "model_name": "STD_ADT_CT_DEC", "bom": "WWXX00STDA-CTDEC", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 6.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 33, "ww_gol": 27, "hamburg": 0, "jp": 0, "burn_rate": 1.33, "valid_months": 3, "stockout_excluded": 0, "total_stock": 60, "coverage_months": 45.11, "status": "ok"}, {"item_name": "Steam Dial", "model_name": "STD", "bom": "WWXX00STDA-00000", "remark": "", "eta": "End of April 400 pcs", "launch_date": "", "category": "Espresso Tools", "safety_stock": 173.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 79, "ww_gol": 33, "hamburg": 24, "jp": 12, "burn_rate": 22.25, "valid_months": 12, "stockout_excluded": 0, "total_stock": 148, "coverage_months": 6.65, "status": "ok"}, {"item_name": "Brew Boldly Tread Lightly Xl", "model_name": "TSH_BB_XL", "bom": "TSH_BB_XL", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 21.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 13, "ww_gol": 33, "hamburg": 14, "jp": 0, "burn_rate": 1.83, "valid_months": 6, "stockout_excluded": 0, "total_stock": 60, "coverage_months": 32.79, "status": "discontinued"}, {"item_name": "Steam Dial Adapter: M10x1 Female", "model_name": "STD_ADT_ECM", "bom": "WWXX00STDA-ADECM", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 29.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 25, "ww_gol": 11, "hamburg": 14, "jp": 6, "burn_rate": 2.83, "valid_months": 12, "stockout_excluded": 0, "total_stock": 56, "coverage_months": 19.79, "status": "ok"}, {"item_name": "Brew Boldly Tread Lightly S", "model_name": "TSH_BB_S", "bom": "TSH_BB_S", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 6.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 4, "ww_gol": 14, "hamburg": 7, "jp": 0, "burn_rate": 1.0, "valid_months": 3, "stockout_excluded": 0, "total_stock": 25, "coverage_months": 25.0, "status": "discontinued"}, {"item_name": "MGT-L", "model_name": "MGT-L", "bom": "1A0000MGTA-A03SC", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 90.2, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 191, "ww_gol": 116, "hamburg": 75, "jp": 16, "burn_rate": 15.33, "valid_months": 12, "stockout_excluded": 0, "total_stock": 398, "coverage_months": 25.96, "status": "discontinued"}, {"item_name": "Unibasket - 20g", "model_name": "UNB-20", "bom": "YCXX00UNBA-00058", "remark": "Switch to new version, discontinue after sold out current stock", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 940.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 3020, "ww_gol": 476, "hamburg": 42, "jp": 73, "burn_rate": 141.08, "valid_months": 12, "stockout_excluded": 0, "total_stock": 3611, "coverage_months": 25.6, "status": "discontinued"}, {"item_name": "Steam Dial Adapter: M6x1 Female", "model_name": "STD_ADT_LAP", "bom": "WWXX00STDA-ADLAP", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 14.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 25, "ww_gol": 24, "hamburg": 5, "jp": 3, "burn_rate": 1.17, "valid_months": 6, "stockout_excluded": 0, "total_stock": 57, "coverage_months": 48.72, "status": "ok"}, {"item_name": "Steam Dial Adapter: M7x1 Male", "model_name": "STD_ADT_CRM", "bom": "WWXX00STDA-ADCRM", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 14.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 40, "ww_gol": 9, "hamburg": 14, "jp": 18, "burn_rate": 2.2, "valid_months": 10, "stockout_excluded": 0, "total_stock": 81, "coverage_months": 36.82, "status": "ok"}, {"item_name": "Steam Dial Adapter: M8.5 x 1.0 Male", "model_name": "STD_ADT_LDM", "bom": "WWXX00STDA-ADLDM", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 6.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 19, "ww_gol": 0, "hamburg": 20, "jp": 5, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 44, "coverage_months": 0, "status": "out_of_stock"}, {"item_name": "Steam Dial Adapter: M8.5x0.75 Male", "model_name": "STD_ADT_DEC", "bom": "WWXX00STDA-ADDEC", "remark": "", "eta": "End of May 200 pcs", "launch_date": "", "category": "Spare Parts", "safety_stock": 82.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 64, "ww_gol": 28, "hamburg": 4, "jp": 15, "burn_rate": 3.86, "valid_months": 7, "stockout_excluded": 0, "total_stock": 111, "coverage_months": 28.76, "status": "ok"}, {"item_name": "Steam Dial Adapter: M8x0.75 Female", "model_name": "STD_ADT_KEES", "bom": "WWXX00STDA-ADKEE", "remark": "", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 7.5, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 22, "ww_gol": 32, "hamburg": 8, "jp": 20, "burn_rate": 1.17, "valid_months": 6, "stockout_excluded": 0, "total_stock": 82, "coverage_months": 70.09, "status": "ok"}, {"item_name": "The EG-1 - Onyx", "model_name": "EG1-B", "bom": "YCXX00EG1A-0000B", "remark": "", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 249.5, "wip": 0, "new_po": 0, "in_transit": 42, "wholesale_committed": 6, "key_item": true, "tpe": 17, "ww_gol": 0, "hamburg": 3, "jp": 1, "burn_rate": 42.17, "valid_months": 12, "stockout_excluded": 0, "total_stock": 21, "coverage_months": 0.5, "status": "critical"}, {"item_name": "Wagyumafia - Moulin Grinders Set", "model_name": "WMM", "bom": "DYXX00MGSA-0000W", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 13.2, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 70, "ww_gol": 7, "hamburg": 0, "jp": 1, "burn_rate": 2.17, "valid_months": 6, "stockout_excluded": 0, "total_stock": 78, "coverage_months": 35.94, "status": "discontinued"}, {"item_name": "The EG-1 - Silver", "model_name": "EG1", "bom": "YCXX00EG1A-00000", "remark": "", "eta": "Early June", "launch_date": "", "category": "Grinders", "safety_stock": 204.0, "wip": 0, "new_po": 0, "in_transit": 15, "wholesale_committed": 13, "key_item": true, "tpe": 0, "ww_gol": 0, "hamburg": 1, "jp": 1, "burn_rate": 36.83, "valid_months": 12, "stockout_excluded": 0, "total_stock": 2, "coverage_months": 0.05, "status": "critical"}, {"item_name": "The HG-2_2 - Onyx", "model_name": "HG2B_2", "bom": "YCXX00HG22-0000B", "remark": "Assembly in progress", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 58.75, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": true, "tpe": 17, "ww_gol": 27, "hamburg": 1, "jp": 1, "burn_rate": 7.92, "valid_months": 12, "stockout_excluded": 0, "total_stock": 46, "coverage_months": 5.81, "status": "ok"}, {"item_name": "The HG-2_2 - Silver", "model_name": "HG2_2", "bom": "YCXX00HG22-00000", "remark": "Assembly in progress", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 55.75, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": true, "tpe": 5, "ww_gol": 16, "hamburg": 1, "jp": 1, "burn_rate": 6.25, "valid_months": 12, "stockout_excluded": 0, "total_stock": 23, "coverage_months": 3.68, "status": "low"}, {"item_name": "The Key-2- Black", "model_name": "KEY-2-B", "bom": "YCXX00KEY2-0000B", "remark": "Assembly in progress", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 223.5, "wip": 0, "new_po": 360, "in_transit": 10, "wholesale_committed": 1, "key_item": true, "tpe": 71, "ww_gol": 32, "hamburg": 4, "jp": 0, "burn_rate": 21.67, "valid_months": 12, "stockout_excluded": 0, "total_stock": 107, "coverage_months": 4.94, "status": "ok"}, {"item_name": "The Key-2- Snow", "model_name": "KEY-2-W", "bom": "YCXX00KEY2-0000W", "remark": "", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 120.82, "wip": 0, "new_po": 240, "in_transit": 0, "wholesale_committed": 0, "key_item": true, "tpe": 26, "ww_gol": 22, "hamburg": 1, "jp": 2, "burn_rate": 13.83, "valid_months": 12, "stockout_excluded": 0, "total_stock": 51, "coverage_months": 3.69, "status": "low"}, {"item_name": "Unibasket58mm - 16g(New rev.)", "model_name": "UNB-B16", "bom": "YCXX00UNBB-05816", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 437.5, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 4, "key_item": false, "tpe": 912, "ww_gol": 596, "hamburg": 25, "jp": 35, "burn_rate": 74.58, "valid_months": 12, "stockout_excluded": 0, "total_stock": 1568, "coverage_months": 21.02, "status": "ok"}, {"item_name": "Make Coffee, Not War - M", "model_name": "TSH_UKR-M", "bom": "WWXX00TSHA-0UKRM", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 1, "burn_rate": 0.67, "valid_months": 3, "stockout_excluded": 0, "total_stock": 1, "coverage_months": 1.49, "status": "discontinued"}, {"item_name": "Unibasket58mm - 20g(New rev.)", "model_name": "UNB-B20", "bom": "YCXX00UNBB-05820", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 1363.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 10, "key_item": false, "tpe": 2814, "ww_gol": 629, "hamburg": 81, "jp": 7, "burn_rate": 69.0, "valid_months": 12, "stockout_excluded": 0, "total_stock": 3531, "coverage_months": 51.17, "status": "ok"}, {"item_name": "Unibasket58mm - 24g(New rev.)", "model_name": "UNB-B24", "bom": "YCXX00UNBB-05824", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 218.33, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 698, "ww_gol": 173, "hamburg": 21, "jp": 12, "burn_rate": 32.75, "valid_months": 12, "stockout_excluded": 0, "total_stock": 904, "coverage_months": 27.6, "status": "ok"}, {"item_name": "Unibasket58mm - 28g(New rev.)", "model_name": "UNB-B28", "bom": "YCXX00UNBB-05828", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 183.25, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 541, "ww_gol": 264, "hamburg": 6, "jp": 0, "burn_rate": 8.44, "valid_months": 9, "stockout_excluded": 0, "total_stock": 811, "coverage_months": 96.09, "status": "ok"}, {"item_name": "Unifilter-2_Onyx wood", "model_name": "UNF-2-OW", "bom": "YCXX00UNFB-000OW", "remark": "", "eta": "Mid July 50 pcs", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0, "status": "out_of_stock"}, {"item_name": "Unifilter-2_Rubber", "model_name": "UNF-2-R", "bom": "YCXX00UNFB-0000R", "remark": "", "eta": "Mid July", "launch_date": "", "category": "Espresso Tools", "safety_stock": 238.5, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 2, "key_item": false, "tpe": 75, "ww_gol": 147, "hamburg": 18, "jp": 12, "burn_rate": 33.0, "valid_months": 12, "stockout_excluded": 0, "total_stock": 252, "coverage_months": 7.64, "status": "ok"}, {"item_name": "Unifilter-2_Teak", "model_name": "UNF-2-T", "bom": "YCXX00UNFB-0000T", "remark": "", "eta": "Mid July", "launch_date": "", "category": "Espresso Tools", "safety_stock": 293.36, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 3, "key_item": false, "tpe": 123, "ww_gol": 81, "hamburg": 15, "jp": 9, "burn_rate": 40.83, "valid_months": 12, "stockout_excluded": 0, "total_stock": 228, "coverage_months": 5.58, "status": "ok"}, {"item_name": "EG-1 Burrs_DB3", "model_name": "DB3", "bom": "WWXX00DB3A-0BASE", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Spare Parts", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Cleaning Brush Tips - Boar Hair", "model_name": "BRT-B", "bom": "WWXX00BRTA-0000B", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Accessories", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 9, "ww_gol": 0, "hamburg": 2, "jp": 3, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 14, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Drink different _EG1_XXL", "model_name": "EG1_TSH_XXL", "bom": "EG1_TSH_XXL", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 1, "jp": 0, "burn_rate": 2.0, "valid_months": 3, "stockout_excluded": 0, "total_stock": 1, "coverage_months": 0.5, "status": "discontinued"}, {"item_name": "Unifilter49_Rubber", "model_name": "UNF49-R", "bom": "YCXXUNF49A-0000R", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 32.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 13, "ww_gol": 14, "hamburg": 0, "jp": 4, "burn_rate": 4.71, "valid_months": 7, "stockout_excluded": 0, "total_stock": 31, "coverage_months": 6.58, "status": "ok"}, {"item_name": "Unibasket58mm - 16g", "model_name": "UNB-16", "bom": "YCXX00UNBA-05816", "remark": "Switch to new version, discontinue after sold out current stock", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 3, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 3, "coverage_months": 0, "status": "discontinued"}, {"item_name": "MOONRAKER™ - Magnet for maintain", "model_name": "MNR-M-M", "bom": "WWXX0MWDTA-0MGMT", "remark": "Discontinue (added in new package already)", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 10, "ww_gol": 12, "hamburg": 7, "jp": 0, "burn_rate": 1.5, "valid_months": 2, "stockout_excluded": 0, "total_stock": 29, "coverage_months": 19.33, "status": "discontinued"}, {"item_name": "The Key - Onyx", "model_name": "KEY-B", "bom": "KEY-B", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 41, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 41, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Unifilter_Rubber", "model_name": "UNF-R", "bom": "YCXX00UNFA-0000R", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Unifilter_Teak", "model_name": "UNF-T", "bom": "YCXX00UNFA-0000T", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 4, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 4, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Make Coffee, Not War - L", "model_name": "TSH_UKR-L", "bom": "WWXX00TSHA-0UKRL", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 1, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 1, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Bean Counter", "model_name": "BC1", "bom": "WWXX00BC1A-00000", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Equipment", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 1, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 1, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Drink different _BD1_150", "model_name": "BD1_TSH_150", "bom": "BD1_TSH_150", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 16, "ww_gol": 2, "hamburg": 4, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 22, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Drink different _BD1_S", "model_name": "BD1_TSH_S", "bom": "BD1_TSH_S", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 9, "ww_gol": 7, "hamburg": 3, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 19, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Blind Tumbler - Silver (old)", "model_name": "BLT-S(old)", "bom": "BLT-S(old)", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0, "status": "discontinued"}, {"item_name": "The Key - Snow", "model_name": "KEY-W", "bom": "KEY-W", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Grinders", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 2, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 2, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Make Coffee, Not War - 120", "model_name": "TSH_120", "bom": "WWXX00TSHA-00120", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 4, "ww_gol": 0, "hamburg": 0, "jp": 7, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 11, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Unifilter_Cut Off", "model_name": "UNF-C", "bom": "YCXX00UNFA-0000C", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 8, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 8, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Unifilter_DoglegRubber", "model_name": "UNF-DR", "bom": "YCXX00UNFA-000DR", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 1, "ww_gol": 0, "hamburg": 0, "jp": 1, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 2, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Unifilter_DoglegTeak", "model_name": "UNF-DT", "bom": "YCXX00UNFA-000DT", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0, "valid_months": 0, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Make Coffee, Not War - XL", "model_name": "TSH_UKR-XL", "bom": "WWXX00TSHA-UKRXL", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 0, "ww_gol": 0, "hamburg": 0, "jp": 0, "burn_rate": 0.0, "valid_months": 1, "stockout_excluded": 0, "total_stock": 0, "coverage_months": 0, "status": "discontinued"}, {"item_name": "Drink different _EG1_150", "model_name": "EG1_TSH_150", "bom": "EG1_TSH_150", "remark": "Discontinued", "eta": "", "launch_date": "", "category": "Merchandise", "safety_stock": 0.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 12, "ww_gol": 7, "hamburg": 2, "jp": 0, "burn_rate": 1.0, "valid_months": 1, "stockout_excluded": 0, "total_stock": 21, "coverage_months": 21.0, "status": "discontinued"}, {"item_name": "Unifilter49_Teak", "model_name": "UNF49-T", "bom": "YCXXUNF49A-0000T", "remark": "", "eta": "", "launch_date": "", "category": "Espresso Tools", "safety_stock": 27.0, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 31, "ww_gol": 27, "hamburg": 0, "jp": 5, "burn_rate": 4.38, "valid_months": 8, "stockout_excluded": 0, "total_stock": 63, "coverage_months": 14.38, "status": "ok"}, {"item_name": "WW X Sibarist BIRD Paper Filters", "model_name": "BD1-SIB", "bom": "27070BIRDA-A01ST", "remark": "", "eta": "Mid May 2000 pcs", "launch_date": "", "category": "Brewers", "safety_stock": 527.2, "wip": 0, "new_po": 0, "in_transit": 0, "wholesale_committed": 0, "key_item": false, "tpe": 30, "ww_gol": 493, "hamburg": 227, "jp": 21, "burn_rate": 63.92, "valid_months": 12, "stockout_excluded": 0, "total_stock": 771, "coverage_months": 12.06, "status": "ok"}];
+
+let ALL_DATA = [], filtered = [];
+let currentFilter = 'all', currentCat = 'all', currentWh = 'all', showKeyOnly = false;
+let sortCol = 'status', sortDir = 1;
+let charts = {}, modalChart = null;
+
+
+// Get ISO week number
+function getISOWeek(date) {
+  const d = new Date(date);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+}
+function currentWeekBadge() {
+  return `WEEK ${getISOWeek(new Date())}`;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('searchBox').addEventListener('input', applyFilters);
+  document.getElementById('catSelect').addEventListener('change', e => { currentCat = e.target.value; applyFilters(); });
+  document.getElementById('whSelect').addEventListener('change', e => { currentWh = e.target.value; applyFilters(); });
+  document.querySelectorAll('.fbtn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.fbtn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    currentFilter = b.dataset.f;
+    applyFilters();
+  }));
+  document.querySelectorAll('thead th[data-col]').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = 1; }
+      document.querySelectorAll('thead th').forEach(t => t.classList.remove('sorted'));
+      th.classList.add('sorted');
+      th.querySelector('.si').textContent = sortDir === 1 ? '↓' : '↑';
+      renderTable();
+    });
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+  // Load snapshot immediately
+  ALL_DATA = SNAPSHOT;
+  applyFilters();
+  renderStats();
+  renderCharts();
+  document.getElementById('lastSyncTime').textContent = 'Snapshot: Week 20 — click Sync for latest';
+  document.getElementById('weekBadge').textContent = currentWeekBadge();
+  const stEl = document.getElementById('syncStatus');
+  stEl.className = 'sync-status ok';
+  stEl.textContent = `✓ ${SNAPSHOT.length} items loaded`;
+  stEl.style.display = '';
+});
+
+// ── Fetch CSV from published Google Sheet URL ────────────────────────────────
+async function loadSheet(key) {
+  const url = CSV_URLS[key];
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Cannot fetch ${key} (HTTP ${res.status})`);
+  const text = await res.text();
+  return new Promise((resolve, reject) => {
+    Papa.parse(text, {
+      header: true,
+      skipEmptyLines: true,
+      complete: r => resolve(r.data),
+      error: e => reject(e)
+    });
+  });
+}
+
+const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const ym  = d => {
+  if (!d) return '';
+  if (d instanceof Date) return d.toISOString().substring(0, 7);
+  // Google JSONP dates come as "Date(2025,4,1)" format
+  const dm = String(d).match(/Date\((\d+),(\d+)/);
+  if (dm) {
+    const yr = parseInt(dm[1]), mo = parseInt(dm[2]) + 1;
+    return `${yr}-${String(mo).padStart(2,'0')}`;
+  }
+  return String(d).substring(0, 7);
+};
+
+// Parse month string from pivot table header → 'YYYY-MM'
+function parsePivotMonth(val) {
+  if (!val) return null;
+  const s = String(val).trim();
+  // Google JSONP date object format: already parsed as 'YYYY-MM' by our ym() function
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  // 'May 2025' format (Retail)
+  const months = {Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',
+                  Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12'};
+  const m1 = s.match(/^([A-Za-z]{3})\.?\s+(\d{4})$/);
+  if (m1) return `${m1[2]}-${months[m1[1]] || '01'}`;
+  // '5/1/2025' or '2025-05-01' format (Wholesale)
+  const m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m2) return `${m2[3]}-${String(m2[1]).padStart(2,'0')}`;
+  const m3 = s.match(/^(\d{4})-(\d{2})/);
+  if (m3) return `${m3[1]}-${m3[2]}`;
+  // Date object stringified
+  if (s.includes('Date(')) {
+    const dm = s.match(/Date\((\d+),(\d+)/);
+    if (dm) return `${dm[1]}-${String(parseInt(dm[2])+1).padStart(2,'0')}`;
+  }
+  return null;
+}
+
+// Read pivot table: first col = SKU, remaining cols = month headers with sales values
+function buildMonthlyFromPivot(rows, excMap) {
+  if (!rows || rows.length === 0) return {};
+  const monthly = {};
+
+  // rows[0] is the header row from JSONP — keys are column labels
+  // For pivot tables, JSONP returns each row as an object with column labels as keys
+  // First, find which keys are month columns vs SKU column
+  const firstRow = rows[0];
+  const allKeys = Object.keys(firstRow);
+
+  // SKU key is the first non-month key (usually 'Product variant' or similar)
+  const skuKey = allKeys[0];
+
+  // Month keys: parse each key to see if it's a valid month
+  const monthCols = [];
+  for (const key of allKeys.slice(1)) {
+    const parsed = parsePivotMonth(key);
+    if (parsed) monthCols.push({ key, month: parsed });
+  }
+
+  for (const row of rows) {
+    const sku = String(row[skuKey] || '').trim();
+    if (!sku || sku === skuKey || sku === 'Grand Total') continue;
+    // Skip DRRO variants
+    if (sku.endsWith('-DRRO')) continue;
+
+    for (const { key, month } of monthCols) {
+      const raw = row[key];
+      const qty = parseFloat(raw);
+      if (isNaN(qty) || qty === 0) continue;
+
+      // Apply exception map
+      const targets = excMap[sku] ? excMap[sku].map(([m, mult]) => [m, qty * mult]) : [[sku, qty]];
+      for (const [model, adj] of targets) {
+        if (!monthly[model]) monthly[model] = {};
+        monthly[model][month] = (monthly[model][month] || 0) + adj;
+      }
+    }
+  }
+  return monthly;
+}
+
+function buildMonthly(rows, excMap) {
+  const monthly = {};
+  for (const row of rows) {
+    const sku   = (row['Product variant SKU'] || '').trim();
+    const month = ym(row['Month'] || '');
+    const qty   = num(row['Net items sold']);
+    if (!sku || !month || sku === 'nan') continue;
+    const targets = excMap[sku] ? excMap[sku].map(([m,mult]) => [m, qty*mult]) : [[sku, qty]];
+    for (const [model, adj] of targets) {
+      if (!monthly[model]) monthly[model] = {};
+      monthly[model][month] = (monthly[model][month] || 0) + adj;
+    }
+  }
+  return monthly;
+}
+
+function mergeMonthly(a, b) {
+  const out = {};
+  for (const [m, mons] of Object.entries(a)) { out[m] = { ...mons }; }
+  for (const [m, mons] of Object.entries(b)) {
+    if (!out[m]) out[m] = {};
+    for (const [mo, q] of Object.entries(mons)) out[m][mo] = (out[m][mo] || 0) + q;
+  }
+  return out;
+}
+
+function computeBurn(md, launchYM) {
+  if (!md) return {burn:0,validMonths:0,excluded:0};
+  let months = Object.keys(md).sort();
+  if (launchYM) months = months.filter(m => m > launchYM);
+  if (!months.length) return {burn:0,validMonths:0,excluded:0};
+  const excl = new Set();
+  for (let i=0; i<months.length; i++) {
+    if ((md[months[i]]||0) <= 0) {
+      const pOk = i>0 && (md[months[i-1]]||0)>0;
+      const nOk = i<months.length-1 && (md[months[i+1]]||0)>0;
+      if (pOk && nOk) excl.add(months[i]);
+    }
+  }
+  const valid = months.filter(m => !excl.has(m));
+  if (!valid.length) return {burn:0,validMonths:0,excluded:excl.size};
+  const total = valid.reduce((s,m) => s+(md[m]||0), 0);
+  return {burn: Math.round(total/valid.length*100)/100, validMonths:valid.length, excluded:excl.size};
+}
+
+async function syncAll() {
+  const btn = document.getElementById('syncBtn');
+  const stEl = document.getElementById('syncStatus');
+  const ldEl = document.getElementById('loadingOverlay');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Syncing...';
+  ldEl.classList.add('open');
+  stEl.style.display = 'none';
+  const setMsg = (m,s='') => { document.getElementById('loadingMsg').textContent=m; document.getElementById('loadingSub').textContent=s; };
+  try {
+    setMsg('Reading ERP data...', 'TPE + Golden warehouses');
+    // Stock data read directly from Full Inventory report
+    setMsg('Reading Shopify sales...', 'Retail channel');
+    const retailRows = await loadSheet('retail');
+    setMsg('Reading Shopify sales...', 'Wholesale channel');
+    const wsRows = await loadSheet('wholesale');
+    const allMonthly = mergeMonthly(
+      buildMonthlyFromPivot(retailRows, RETAIL_EXC, 'MMM YYYY'),
+      buildMonthlyFromPivot(wsRows, WHOLESALE_EXC, 'D/M/YYYY')
+    );
+    setMsg('Building inventory table...', 'Calculating coverage');
+    const fiRows = await loadSheet('fullInv');
+    const result = [];
+    for (const row of fiRows) {
+      const itemName = (row['Item Name']||row[' Item Name']||'').trim();
+      if (!itemName||itemName==='Item Name') continue;
+      const modelName = (row[' Model Name']||row['Model Name']||'').trim();
+      const bom       = (row['BOM part number']||'').trim();
+      const altBom    = (row['ALT BOM']||'').trim().replace(/\n/g,'').replace(/\r/g,'');
+      const remark    = (row['Remark']||'').trim();
+      const eta       = (row['ETA at TPE']||row['ETA']||'').trim();
+      const launchDate= (row['Launch Date']||'').trim();
+      const statusOv  = (row['Status']||'').trim().toLowerCase();
+      const safety    = num(row['Safety Stock\n(usage for 6 months)']||row['Safety Stock']||0);
+      const wip       = num(row['WIP']||0);
+      const newPo     = num(row['New PO qty']||0);
+      const inTransit = num(row['Goods In Transit - WW']||row['Goods In Transit']||0);
+      const wsCom     = num(row['Wholesale commited qty']||0);
+      const keyItem   = (row['key tracking items']||'').trim()==='v';
+      const etaClean  = (eta==='0'||eta==='NaT'||eta==='nan')?'':eta;
+      const launchYM  = (launchDate&&launchDate!=='nan'&&launchDate!=='NaT')?launchDate.substring(0,7):null;
+      const so        = (statusOv==='nan'||statusOv==='')?'':statusOv;
+      const growthFactor = num(row['Growth Factor']||1.2) || 1.2;
+      // Read stock directly from Full Inventory report columns
+      const tpe     = num(row['TPE']||0);
+      const ww_gol  = num(row['WW-GOL - WW']||0);
+      const hamburg = num(row['Hamburg']||0);
+      const jp      = num(row['JP']||0);
+      const total   = tpe+ww_gol+hamburg+jp;
+      const {burn,validMonths,excluded}=computeBurn(allMonthly[modelName],launchYM);
+      const adjustedBurn=burn*growthFactor;
+      const coverage=adjustedBurn>0?Math.round(total/adjustedBurn*100)/100:0;
+      const category=CATEGORIES[modelName]||'Other';
+      const rl=remark.toLowerCase();
+      let status;
+      if (so) status=so;
+      else if (rl.includes('discontinue')) status='discontinued';
+      else if (rl.includes('newly launched')||rl.includes('newly')) status='new';
+      else if (launchYM) status='new';
+      else if (coverage<=0) status='out_of_stock';
+      else if (coverage<2) status='critical';
+      else if (coverage<4) status='low';
+      else status='ok';
+      result.push({item_name:itemName,model_name:modelName,bom,remark,eta:etaClean,launch_date:launchDate||'',
+        category,safety_stock:safety,wip,new_po:newPo,in_transit:inTransit,wholesale_committed:wsCom,
+        key_item:keyItem,tpe,ww_gol,hamburg,jp,burn_rate:burn,valid_months:validMonths,
+        stockout_excluded:excluded,total_stock:total,coverage_months:coverage,status});
+    }
+    ALL_DATA=result;
+    applyFilters(); renderStats(); renderCharts();
+    const now=new Date().toLocaleString('en-GB');
+    document.getElementById('lastSyncTime').textContent=`Last sync: ${now}`;
+    document.getElementById('weekBadge').textContent=currentWeekBadge();
+    stEl.className='sync-status ok'; stEl.textContent=`✓ ${result.length} items loaded`; stEl.style.display='';
+  } catch(err) {
+    console.error(err);
+    stEl.className='sync-status error'; stEl.textContent=`✕ Sync failed: ${err.message}`; stEl.style.display='';
+    if(ALL_DATA.length===0){
+      document.getElementById('tbody').innerHTML=`<tr><td colspan="8" style="text-align:center;padding:48px;color:var(--muted);">
+        ⚠ Unable to connect to Google Sheet.<br><br>
+        Please ensure:<br>1. The spreadsheet is set to "Anyone with the link can view"<br>
+        2. This page is opened via <strong>https://</strong> (upload to Google Drive first)<br>
+        <small style="font-family:'DM Mono',monospace;font-size:10px;margin-top:8px;display:block;opacity:.5">${err.message}</small>
+      </td></tr>`;
+    }
+  } finally {
+    btn.disabled=false; btn.innerHTML='<span>↻</span> Sync Latest Data'; ldEl.classList.remove('open');
+  }
+}
+
+// Get effective stock for a product given warehouse filter
+function getWhStock(d, wh) {
+  if (wh === 'all') return d.total_stock;
+  return d[wh] || 0;
+}
+
+// Get effective coverage given warehouse filter
+function getWhCoverage(d, wh) {
+  if (wh === 'all') return d.coverage_months;
+  const stock = d[wh] || 0;
+  const burn = d.adjusted_burn || d.burn_rate;
+  return burn > 0 ? Math.round(stock / burn * 100) / 100 : 0;
+}
+
+// Get effective status given warehouse filter
+function getWhStatus(d, wh) {
+  if (wh === 'all') return d.status;
+  if (d.status === 'discontinued' || d.status === 'new') return d.status;
+  const cov = getWhCoverage(d, wh);
+  if (cov <= 0) return 'out_of_stock';
+  if (cov < 2) return 'critical';
+  if (cov < 4) return 'low';
+  return 'ok';
+}
+
+function applyFilters() {
+  const q = document.getElementById('searchBox').value.toLowerCase();
+  filtered = ALL_DATA.filter(d => {
+    const effStatus = getWhStatus(d, currentWh);
+    const ms = currentFilter==='all'||effStatus===currentFilter;
+    const mc = currentCat==='all'||d.category===currentCat;
+    const mq = !q||d.item_name.toLowerCase().includes(q)||d.model_name.toLowerCase().includes(q);
+    const mk = !showKeyOnly||d.key_item;
+    const mw = currentWh==='all'||(d[currentWh]||0)>0||d.status==='discontinued';
+    return ms&&mc&&mq&&mk&&mw;
+  });
+  renderTable();
+  if (ALL_DATA.length > 0) renderCharts();
+}
+
+function toggleKey() {
+  showKeyOnly=!showKeyOnly;
+  document.getElementById('keyBtn').classList.toggle('active',showKeyOnly);
+  applyFilters();
+}
+
+function covColor(m,s){
+  if(s==='discontinued'||s==='new') return '#d6d3cd';
+  if(m<=0) return'#dc2626'; if(m<2) return'#dc2626'; if(m<4) return'#ca8a04'; return'#16a34a';
+}
+function covWidth(m){return Math.min(100,Math.max(0,(m/12)*100));}
+
+function renderTable() {
+  const sorted=[...filtered].sort((a,b)=>{
+    if(sortCol==='status') return(STATUS_ORDER[a.status]-STATUS_ORDER[b.status])*sortDir;
+    if(sortCol==='item_name') return a.item_name.localeCompare(b.item_name)*sortDir;
+    return((a[sortCol]||0)-(b[sortCol]||0))*sortDir;
+  });
+  document.getElementById('tableMeta').textContent=`Showing ${sorted.length} of ${ALL_DATA.length} items`;
+  document.getElementById('tbody').innerHTML=sorted.map(d=>{
+    const idx=ALL_DATA.indexOf(d);
+    const effCov    = getWhCoverage(d, currentWh);
+    const effStock  = getWhStock(d, currentWh);
+    const effStatus = getWhStatus(d, currentWh);
+    const cc=covColor(effCov, effStatus);
+    const cw=covWidth(effCov);
+    const chips2 = [
+      {key:'tpe',    val:d.tpe,    cls:'tpe'},
+      {key:'ww_gol', val:d.ww_gol, cls:'gol'},
+      {key:'hamburg',val:d.hamburg,cls:'ham'},
+      {key:'jp',     val:d.jp,     cls:'jp'},
+    ].filter(w=>w.val>0).map(w=>{
+      const hl = currentWh!=='all'&&currentWh===w.key?'outline:2px solid currentColor;border-radius:3px;':'';
+      return `<span class="chip ${w.cls}" style="${hl}"><span class="dot ${w.cls}"></span>${Math.round(w.val)}</span>`;
+    }).join('');
+    const chips=[
+      d.tpe>0?`<span class="chip tpe"><span class="dot tpe"></span>${Math.round(d.tpe)}</span>`:'',
+      d.ww_gol>0?`<span class="chip gol"><span class="dot gol"></span>${Math.round(d.ww_gol)}</span>`:'',
+      d.hamburg>0?`<span class="chip ham"><span class="dot ham"></span>${Math.round(d.hamburg)}</span>`:'',
+      d.jp>0?`<span class="chip jp"><span class="dot jp"></span>${Math.round(d.jp)}</span>`:'',
+    ].join('');
+    const burnNote=d.stockout_excluded>0?`<div class="data-note">${d.stockout_excluded} stockout mo. excluded · ${d.valid_months} valid</div>`:d.valid_months>0&&d.valid_months<12?`<div class="data-note">${d.valid_months} months data</div>`:'';
+    return`<tr class="${d.key_item?'key-row':''}" onclick="openModal(${idx})">
+      <td><div class="iname">${d.key_item?'<span class="key-star">⭐</span>':''}${d.item_name}</div>
+          <div class="imodel">${d.model_name}</div>
+          <div class="cat-tag">${d.category}</div></td>
+      <td><span class="badge b-${d.status}">${STATUS_LABEL[d.status]}</span></td>
+      <td><div class="wh-chips">${chips||'<span style="color:var(--muted2);font-size:10px">—</span>'}</div></td>
+      <td><span class="mono">${Math.round(d.total_stock).toLocaleString()}</span></td>
+      <td><span class="mono" style="color:var(--muted)">${d.burn_rate>0?d.burn_rate.toFixed(1)+'/mo':'—'}</span>${burnNote}</td>
+      <td><div class="cov-wrap">
+        <div class="cov-text" style="color:${cc}">${d.coverage_months>0?d.coverage_months.toFixed(1)+' mo':'—'}</div>
+        <div class="cov-bar"><div class="cov-fill" style="width:${cw}%;background:${cc}"></div></div>
+      </div></td>
+      <td><span style="font-size:10px;color:var(--muted)">${d.eta||'—'}</span></td>
+      <td><div class="remark-text">${d.remark||'—'}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderStats() {
+  const c={};
+  ALL_DATA.forEach(d=>c[d.status]=(c[d.status]||0)+1);
+  document.getElementById('statsRow').innerHTML=[
+    {key:'critical',lbl:'Critical'},
+    {key:'out_of_stock',lbl:'Out of Stock'},
+    {key:'low',lbl:'Low Stock'},
+    {key:'ok',lbl:'Healthy'},
+    {key:'new',lbl:'New Products'},
+  ].map(x=>`<button class="stat-card ${x.key}" onclick="filterByStatus('${x.key}')">
+    <div class="num c-${x.key}">${c[x.key]||0}</div>
+    <div class="lbl">${x.lbl}</div>
+  </button>`).join('');
+}
+
+function filterByStatus(s){
+  document.querySelectorAll('.fbtn').forEach(x=>x.classList.remove('active'));
+  const btn=document.querySelector(`.fbtn[data-f="${s}"]`);
+  if(btn) btn.classList.add('active');
+  currentFilter=s; applyFilters();
+}
+
+// ── Chart pagination ────────────────────────────────────────────────────────
+const chartPages = {lowCov:0, burn:0};
+const chartData  = {lowCov:[], burn:[]};
+
+function shiftChart(id, dir) {
+  const maxPage = Math.max(0, Math.floor((chartData[id].length-1)/10));
+  chartPages[id] = Math.max(0, Math.min(chartPages[id]+dir, maxPage));
+  drawChart(id);
+}
+
+function drawChart(id) {
+  const page  = chartPages[id];
+  const data  = chartData[id];
+  const start = page*10;
+  const slice = data.slice(start, start+10);
+  const total = data.length;
+  const maxPage = Math.max(0, Math.floor((total-1)/10));
+
+  document.getElementById(`${id}-label`).textContent = `${start+1}–${Math.min(start+10,total)}`;
+  document.getElementById(`${id}-prev`).disabled = page===0;
+  document.getElementById(`${id}-next`).disabled = page>=maxPage;
+
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+  const canvas = id==='lowCov' ? 'lowCovChart' : 'burnChart';
+
+  if (id==='lowCov') {
+    charts[id] = new Chart(document.getElementById(canvas), {
+      type:'bar',
+      data:{
+        labels: slice.map(d=>d.model_name||d.item_name.slice(0,14)),
+        datasets:[{
+          data: slice.map(d=>d.coverage_months),
+          backgroundColor: slice.map(d=>d.coverage_months<2?'rgba(220,38,38,.8)':d.coverage_months<4?'rgba(202,138,4,.8)':'rgba(22,163,74,.8)'),
+          borderWidth:0, borderRadius:2
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>`${ctx.raw.toFixed(1)} months`}}},
+        scales:{
+          x:{ticks:{color:'#6b6860',font:{size:9,family:"'DM Mono',monospace"},maxRotation:35,minRotation:35}, grid:{display:false}},
+          y:{ticks:{color:'#9e9b94',font:{size:9}}, grid:{color:'rgba(0,0,0,.04)'}, title:{display:true,text:'Months',color:'#9e9b94',font:{size:9}}}
+        }
+      }
+    });
+  } else {
+    charts[id] = new Chart(document.getElementById(canvas), {
+      type:'bar',
+      data:{
+        labels: slice.map(d=>d.model_name||d.item_name.slice(0,14)),
+        datasets:[{ data:slice.map(d=>d.burn_rate), backgroundColor:'rgba(26,26,24,.75)', borderWidth:0, borderRadius:2 }]
+      },
+      options:{
+        indexAxis:'y', responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:false}, tooltip:{callbacks:{label:ctx=>`${ctx.raw.toFixed(1)}/mo`}}},
+        scales:{
+          x:{ticks:{color:'#9e9b94',font:{size:9}}, grid:{color:'rgba(0,0,0,.04)'}, title:{display:true,text:'Units/month',color:'#9e9b94',font:{size:9}}},
+          y:{ticks:{color:'#6b6860',font:{size:9,family:"'DM Mono',monospace"}}, grid:{display:false}}
+        }
+      }
+    });
+  }
+}
+
+function renderCharts(){
+  Object.values(charts).forEach(c=>c.destroy()); charts={};
+  const base = (filtered.length>0?filtered:ALL_DATA).filter(d=>d.status!=='discontinued');
+
+  chartData.lowCov = base
+    .filter(d=>d.burn_rate>0&&d.status!=='new')
+    .map(d=>({...d,_effCov:getWhCoverage(d,currentWh),_effStock:getWhStock(d,currentWh)}))
+    .filter(d=>d._effStock>0)
+    .sort((a,b)=>a._effCov-b._effCov);
+
+  chartData.burn = base
+    .filter(d=>d.burn_rate>0)
+    .sort((a,b)=>b.burn_rate-a.burn_rate);
+
+  chartPages.lowCov = 0;
+  chartPages.burn   = 0;
+
+  drawChart('lowCov');
+  drawChart('burn');
+}
+
+function openModal(idx){
+  const d=ALL_DATA[idx];
+  const sc=STATUS_COLOR[d.status]||'#6b6860';
+  document.getElementById('mName').textContent=d.item_name;
+  document.getElementById('mSub').textContent=`${d.model_name} · ${d.category} · ${STATUS_LABEL[d.status]}`;
+  const burnNote=d.stockout_excluded>0?`${d.stockout_excluded} stockout months excluded · ${d.valid_months} valid`:d.valid_months>0?`${d.valid_months} months of data`:'';
+  document.getElementById('mKpis').innerHTML=[
+    {label:'Total Stock',val:Math.round(d.total_stock).toLocaleString(),color:sc},
+    {label:'Burn Rate',val:d.burn_rate>0?`${d.burn_rate.toFixed(1)}/mo`:'—',sub:burnNote},
+    ...(d.adjusted_burn&&d.adjusted_burn!==d.burn_rate?[{label:'Adj. Burn (×'+d.growth_factor+')',val:d.adjusted_burn>0?d.adjusted_burn.toFixed(1)+'/mo':'—',color:'var(--low)'}]:[]),
+    {label:'Coverage',val:d.coverage_months>0?`${d.coverage_months.toFixed(1)} mo`:'—',color:sc},
+    {label:'Safety Stock',val:d.safety_stock>0?Math.round(d.safety_stock).toLocaleString():'—'},
+    ...(d.new_po>0?[{label:'New PO',val:d.new_po.toLocaleString(),color:STATUS_COLOR.new}]:[]),
+    ...(d.in_transit>0?[{label:'In Transit',val:d.in_transit.toLocaleString(),color:'#2563eb'}]:[]),
+    ...(d.wholesale_committed>0?[{label:'WS Committed',val:d.wholesale_committed}]:[]),
+    ...(d.launch_date?[{label:'Launch Date',val:d.launch_date}]:[]),
+  ].map(k=>`<div class="mkpi"><div class="kl">${k.label}</div>
+    <div class="kv" style="color:${k.color||'var(--text)'}">${k.val}</div>
+    ${k.sub?`<div class="ks">${k.sub}</div>`:''}</div>`).join('');
+  document.getElementById('mWh').innerHTML=[
+    {label:'TPE (Taipei)',val:Math.round(d.tpe),color:'#2563eb'},
+    {label:'Golden (US)',val:Math.round(d.ww_gol),color:'#059669'},
+    {label:'Hamburg (DE)',val:Math.round(d.hamburg),color:'#ea580c'},
+    {label:'JP (Japan)',val:Math.round(d.jp),color:'#9333ea'},
+  ].map(w=>`<div class="mwh-item"><div class="wn">${w.label}</div>
+    <div class="wq" style="color:${w.color}">${w.val}</div></div>`).join('');
+  const rm=document.getElementById('mRemark');
+  const lines=[d.remark,d.eta?`ETA: ${d.eta}`:''].filter(Boolean).join('<br>');
+  if(lines){rm.style.display='';rm.innerHTML=`<strong>Remarks / ETA</strong>${lines}`;}
+  else rm.style.display='none';
+  if(modalChart){modalChart.destroy();modalChart=null;}
+  modalChart=new Chart(document.getElementById('mChart'),{
+    type:'bar',
+    data:{labels:['TPE','Golden','Hamburg','JP'],
+      datasets:[{data:[d.tpe,d.ww_gol,d.hamburg,d.jp],
+        backgroundColor:['rgba(37,99,235,.75)','rgba(5,150,105,.75)','rgba(234,88,12,.75)','rgba(147,51,234,.75)'],
+        borderWidth:0,borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#9e9b94'},grid:{display:false}},y:{ticks:{color:'#9e9b94'},grid:{color:'rgba(0,0,0,.04)'}}}}
+  });
+  document.getElementById('overlay').classList.add('open');
+}
+
+function closeModal(e){
+  if(!e||e.target===document.getElementById('overlay')||e.currentTarget?.classList?.contains('mclose'))
+    document.getElementById('overlay').classList.remove('open');
+}
+</script>
+</body>
+</html>
